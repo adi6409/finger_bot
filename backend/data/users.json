@@ -1,0 +1,6 @@
+{
+  "test@test.com": {
+    "email": "test@test.com",
+    "hashed_password": "$2b$12$50bDCerKo8t0bLNYlg/AFeWmEA2y2wqyERsDdAzmNrdunt0L1BDQO"
+  }
+}

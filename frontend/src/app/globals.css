@@ -1,0 +1,14 @@
+/* Keep this file for any truly global styles if needed in the future, */
+/* but MUI's CssBaseline handles most resets and theme-based body styles. */
+
+/* Example: You could override default scrollbar styles here */
+/* ::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+} */
