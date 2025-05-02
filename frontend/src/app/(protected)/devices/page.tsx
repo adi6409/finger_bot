@@ -21,11 +21,6 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress'; // For loading state
 import Stack from '@mui/material/Stack'; // For layout
 import Snackbar from '@mui/material/Snackbar'; // For toasts/notifications
-import Dialog from '@mui/material/Dialog';
-import DialogActions from '@mui/material/DialogActions';
-import DialogContent from '@mui/material/DialogContent';
-import DialogContentText from '@mui/material/DialogContentText';
-import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 
 // Import MUI Icons
@@ -34,7 +29,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Cancel';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'; // For 'Press' action
-import QrCodeIcon from '@mui/icons-material/QrCode'; // For QR code
 import AddIcon from '@mui/icons-material/Add'; // For adding new device
 
 type Device = {
@@ -52,13 +46,6 @@ const DevicesPage: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
-  
-  // QR code dialog state
-  const [qrDialogOpen, setQrDialogOpen] = useState(false);
-  const [qrCodeData, setQrCodeData] = useState<string | null>(null);
-  const [qrLoading, setQrLoading] = useState(false);
-  const [deviceMac, setDeviceMac] = useState('');
-
 
   // Fetch devices on mount
   useEffect(() => {
@@ -161,37 +148,9 @@ const DevicesPage: React.FC = () => {
     }
   };
 
-  // Generate QR code for device setup
-  const handleGenerateQrCode = async () => {
-    if (!deviceMac.trim()) {
-      setError('Please enter a device MAC address');
-      return;
-    }
-    
-    setQrLoading(true);
-    setError(null);
-    
-    try {
-      const response = await apiFetch(`/devices/qr/${deviceMac}/base64`);
-      const data = await response.json();
-      setQrCodeData(data.qr_code);
-      setQrDialogOpen(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate QR code');
-    } finally {
-      setQrLoading(false);
-    }
-  };
-  
-  // Close QR code dialog
-  const handleCloseQrDialog = () => {
-    setQrDialogOpen(false);
-    setQrCodeData(null);
-  };
-
   return (
-    <> {/* Add opening fragment tag */}
-      <Paper sx={{ p: 3, maxWidth: 'md', margin: 'auto' }}> {/* Use Paper as a container */}
+    <>
+      <Paper sx={{ p: 3, maxWidth: 'md', margin: 'auto' }}>
         <Typography variant="h5" component="h2" gutterBottom color="primary">
           Manage Devices
         </Typography>
@@ -206,34 +165,6 @@ const DevicesPage: React.FC = () => {
             startIcon={<AddIcon />}
           >
             Setup New Device
-          </Button>
-        </Box>
-        
-        <Divider sx={{ mb: 3 }} />
-        
-        <Typography variant="subtitle1" gutterBottom>
-          Generate QR Code for Device Setup
-        </Typography>
-        
-        <Box sx={{ display: 'flex', gap: 1, mb: 3, alignItems: 'center' }}>
-          <TextField
-            label="Device MAC Address"
-            variant="outlined"
-            size="small"
-            value={deviceMac}
-            onChange={(e) => setDeviceMac(e.target.value)}
-            disabled={qrLoading}
-            placeholder="e.g., AA:BB:CC:DD:EE:FF"
-            sx={{ flexGrow: 1 }}
-          />
-          <Button
-            variant="outlined"
-            color="primary"
-            startIcon={qrLoading ? <CircularProgress size={20} color="inherit" /> : <QrCodeIcon />}
-            onClick={handleGenerateQrCode}
-            disabled={qrLoading || !deviceMac.trim()}
-          >
-            Generate QR
           </Button>
         </Box>
         
@@ -270,7 +201,7 @@ const DevicesPage: React.FC = () => {
           <CircularProgress />
         </Box>
       ) : (
-        <TableContainer component={Paper} variant="outlined"> {/* Wrap table */}
+        <TableContainer component={Paper} variant="outlined">
           <Table sx={{ minWidth: 650 }} aria-label="devices table">
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 'bold' } }}>
@@ -376,40 +307,7 @@ const DevicesPage: React.FC = () => {
           {snackbarMessage}
         </Alert>
       </Snackbar>
-      
-      {/* QR Code Dialog */}
-      <Dialog
-        open={qrDialogOpen}
-        onClose={handleCloseQrDialog}
-        aria-labelledby="qr-code-dialog-title"
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle id="qr-code-dialog-title">Device Setup QR Code</DialogTitle>
-        <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            Scan this QR code with your mobile device to set up your ESP32 device.
-          </DialogContentText>
-          
-          {qrCodeData && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-              <img 
-                src={`data:image/png;base64,${qrCodeData}`} 
-                alt="Device Setup QR Code" 
-                style={{ maxWidth: '100%', height: 'auto' }}
-              />
-            </Box>
-          )}
-          
-          <Typography variant="body2" color="text.secondary" align="center">
-            This QR code contains a link to set up your device with MAC address: {deviceMac}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseQrDialog}>Close</Button>
-        </DialogActions>
-      </Dialog>
-    </> // Keep closing fragment tag
+    </>
   );
 };
 

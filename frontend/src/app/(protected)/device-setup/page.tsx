@@ -103,6 +103,9 @@ const DeviceSetupPage: React.FC = () => {
       setBluetoothDevice({ device, server, service, characteristic });
       setSuccess('Successfully connected to device!');
       
+      // Get the MAC address immediately after connecting
+      await getMacAddress(characteristic);
+      
       // Scan for WiFi networks
       await scanWifiNetworks(characteristic);
       
@@ -299,34 +302,7 @@ const DeviceSetupPage: React.FC = () => {
         throw new Error('Could not confirm WiFi configuration');
       }
       
-      // Get the MAC address if we don't have it yet
-      if (!deviceMac && bluetoothDevice?.device?.gatt?.connected) {
-        try {
-          console.log('Getting device MAC address...');
-          await sendBleCommand(bluetoothDevice.characteristic, { command: 'get_mac' });
-          
-          // Wait for the ESP32 to process the command
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Try to read the MAC address
-          const macValue = await bluetoothDevice.characteristic.readValue();
-          const decoder = new TextDecoder();
-          const macResponseText = decoder.decode(macValue);
-          
-          if (macResponseText) {
-            const macResponse = JSON.parse(macResponseText);
-            console.log('MAC address response:', macResponse);
-            
-            if (macResponse.mac) {
-              // Update URL with MAC address
-              router.replace(`/device-setup?mac=${macResponse.mac}`);
-            }
-          }
-        } catch (macError) {
-          console.warn('Error getting MAC address:', macError);
-          // Continue even if we can't get the MAC address
-        }
-      }
+  // We don't need to get the MAC address here anymore as we get it during initial connection
       
       // Move to next step
       setActiveStep(2);
@@ -359,6 +335,43 @@ const DeviceSetupPage: React.FC = () => {
     }
   };
 
+  // Get MAC address from device
+  const getMacAddress = async (characteristic: any) => {
+    try {
+      if (!deviceMac) { // Only get MAC if we don't already have it
+        console.log('Getting device MAC address...');
+        await sendBleCommand(characteristic, { command: 'get_mac' });
+        
+        // Wait for the ESP32 to process the command
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Try to read the MAC address
+        const macValue = await characteristic.readValue();
+        const decoder = new TextDecoder();
+        const macResponseText = decoder.decode(macValue);
+        
+        if (macResponseText) {
+          try {
+            const macResponse = JSON.parse(macResponseText);
+            console.log('MAC address response:', macResponse);
+            
+            if (macResponse.mac) {
+              // Update URL with MAC address
+              router.replace(`/device-setup?mac=${macResponse.mac}`);
+              return macResponse.mac;
+            }
+          } catch (jsonError) {
+            console.warn('Error parsing MAC address JSON:', jsonError);
+          }
+        }
+      }
+      return deviceMac; // Return existing MAC if we have it
+    } catch (macError) {
+      console.warn('Error getting MAC address:', macError);
+      return deviceMac; // Return existing MAC if there was an error
+    }
+  };
+
   // Register device
   const registerDevice = async () => {
     if (!deviceName.trim()) {
@@ -366,8 +379,14 @@ const DeviceSetupPage: React.FC = () => {
       return;
     }
 
-    if (!deviceMac) {
-      setError('Device MAC address is required. Please restart the setup process.');
+    // Try to get the MAC address again if we don't have it yet
+    let macAddress = deviceMac;
+    if (!macAddress && bluetoothDevice?.device?.gatt?.connected && bluetoothDevice?.characteristic) {
+      macAddress = await getMacAddress(bluetoothDevice.characteristic);
+    }
+
+    if (!macAddress) {
+      setError('Could not get device MAC address. Please try again.');
       return;
     }
 
@@ -375,14 +394,14 @@ const DeviceSetupPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      console.log(`Registering device with MAC: ${deviceMac} and name: ${deviceName}`);
+      console.log(`Registering device with MAC: ${macAddress} and name: ${deviceName}`);
       
       // First, register device with backend
       const response = await apiFetch('/devices', {
         method: 'POST',
         body: JSON.stringify({ 
           name: deviceName,
-          device_id: deviceMac // Use the MAC address from QR code or from Bluetooth
+          device_id: macAddress // Use the MAC address we obtained via Bluetooth
         }),
       });
 
