@@ -9,7 +9,9 @@ from datetime import timedelta
 from typing import Dict, Any, Optional # Import Dict and Any for type hinting
 import qrcode
 import io
-from fastapi.responses import StreamingResponse
+import base64
+from fastapi.responses import StreamingResponse, JSONResponse
+import socket
 
 from backend.jsondb import get_collection, set_collection
 import backend.auth as auth
@@ -59,6 +61,7 @@ origins = [
     "http://localhost:3000",  # Example for a different frontend
     "http://192.168.101.33:3000",
     "http://127.0.0.1:3000",
+    "https://rested-annually-tiger.ngrok-free.app"
     # Add other origins if needed (e.g., your production frontend URL)
 ]
 
@@ -207,11 +210,155 @@ async def create_device(
     current_user: dict = Depends(auth.get_current_active_user)
 ):
     devices_db = get_devices_db()
-    device_id = str(uuid4())
+    
+    # Use provided device_id (MAC address) or generate a new UUID
+    device_id = device.device_id if device.device_id else str(uuid4())
+    
+    # Check if device_id already exists
+    for existing_device in devices_db.values():
+        if existing_device.get("id") == device_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device ID already registered",
+            )
+    
     device_in_db = {"id": device_id, "name": device.name, "owner": current_user["email"]}
     devices_db[device_id] = device_in_db
     set_devices_db(devices_db)
     return DevicePublic(id=device_id, name=device.name)
+
+# --- Device Setup Endpoints ---
+
+@app.get("/devices/qr/{device_mac}")
+async def generate_device_qr(
+    device_mac: str,
+    request: Request,
+    current_user: dict = Depends(auth.get_current_active_user)
+):
+    """Generate a QR code for device setup"""
+    # Get the base URL from the request
+    base_url = str(request.base_url)
+    if base_url.endswith("/"):
+        base_url = base_url[:-1]
+    
+    # Create the setup URL that will be encoded in the QR code
+    setup_url = f"{base_url}/device-setup?mac={device_mac}"
+    
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(setup_url)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Save QR code to bytes buffer
+    buffer = io.BytesIO()
+    img.save(buffer)
+    buffer.seek(0)
+    
+    # Return QR code image
+    return StreamingResponse(buffer, media_type="image/png")
+
+@app.get("/devices/qr/{device_mac}/base64")
+async def generate_device_qr_base64(
+    device_mac: str,
+    request: Request,
+    current_user: dict = Depends(auth.get_current_active_user)
+):
+    """Generate a QR code for device setup and return as base64"""
+    # Get the base URL from the request
+    base_url = str(request.base_url)
+    if base_url.endswith("/"):
+        base_url = base_url[:-1]
+    
+    # Create the setup URL that will be encoded in the QR code
+    setup_url = f"{base_url}/device-setup?mac={device_mac}"
+    
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(setup_url)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Save QR code to bytes buffer
+    buffer = io.BytesIO()
+    img.save(buffer)
+    buffer.seek(0)
+    
+    # Convert to base64
+    qr_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    
+    # Return base64 encoded QR code
+    return {"qr_code": qr_base64}
+
+@app.get("/server-info")
+async def get_server_info(
+    request: Request,
+    current_user: dict = Depends(auth.get_current_active_user)
+):
+    """Get server information for device setup"""
+    # Check if SERVER_HOST is set in app state (passed from server.py)
+    if hasattr(app.state, 'server_host'):
+        # Parse the SERVER_HOST value which is in format "hostname" or "hostname:port"
+        server_host = app.state.server_host
+        if hasattr(app.state, 'server_port'):
+            host = server_host
+            port = app.state.server_port
+        elif ':' in server_host:
+            host, port_str = server_host.split(':', 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                port = 12345  # Default port if parsing fails
+        else:
+            host = server_host
+            port = 12345  # Default port if not specified
+            
+        return {
+            "host": host,
+            "port": port
+        }
+    
+    # Fallback to original behavior if server_host is not set
+    # Use the address the client used to reach the backend (e.g., ngrok domain)
+    base_url = str(request.base_url)
+    # Remove trailing slash if present
+    if base_url.endswith("/"):
+        base_url = base_url[:-1]
+    # Extract host (and port if present)
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    host = parsed.hostname
+    port = parsed.port
+
+    # Check if we're running as part of the unified server
+    from fastapi import FastAPI
+    import inspect
+
+    frame = inspect.currentframe()
+    while frame:
+        if 'app' in frame.f_locals and isinstance(frame.f_locals['app'], FastAPI) and hasattr(frame.f_locals['app'], 'state') and hasattr(frame.f_locals['app'].state, 'tcp_port'):
+            return {
+                "host": host,
+                "port": frame.f_locals['app'].state.tcp_port
+            }
+        frame = frame.f_back
+
+    return {
+        "host": host,
+        "port": port if port else 12345  # Use port from URL if present, else default
+    }
 
 @app.get("/devices", response_model=list[DevicePublic])
 async def list_devices(
@@ -262,8 +409,6 @@ async def delete_device(
     del devices_db[device_id]
     set_devices_db(devices_db)
     return
-
-# --- TODO: Add Schedule Management Endpoints ---
 
 # --- Schedule Management Endpoints ---
 
@@ -380,112 +525,74 @@ async def delete_schedule(
         pass
     return
 
-# --- TCP Device Communication Logic ---
+# --- Device HTTP & WebSocket Communication Logic ---
 
-import asyncio
-import socket
-import struct
-import json
+from fastapi import Body, WebSocket, WebSocketDisconnect
+from typing import Dict
 
-# In-memory mapping: device_id -> TCP connection info
-tcp_device_connections = {}  # device_id: (reader, writer)
+# In-memory mapping: device_id -> last known status
+device_status = {}
 
-# Start a background task to accept TCP device connections
-@app.on_event("startup")
-async def start_tcp_server():
-    # On startup, load all schedules and add jobs
-    schedules_db = get_schedules_db()
-    for s in schedules_db.values():
-        try:
-            schedule_action_job(s["id"], s["device_id"], s["action"], s["time"], s["repeat"])
-        except Exception as e:
-            print(f"Failed to schedule job for {s['id']}: {e}")
+# In-memory mapping: device_id -> WebSocket connection
+device_ws_connections: Dict[str, WebSocket] = {}
 
-    async def handle_device(reader, writer):
-        # For demo: expect device to send its device_id as the first message
-        try:
-            # Read length-prefixed JSON
-            length_bytes = await reader.readexactly(2)
-            length = struct.unpack(">H", length_bytes)[0]
-            data = await reader.readexactly(length)
-            msg = json.loads(data.decode())
-            device_id = msg.get("device_id")
-            if not device_id:
-                writer.close()
-                await writer.wait_closed()
-                return
-            tcp_device_connections[device_id] = (reader, writer)
-            print(f"Device {device_id} connected via TCP")
-            while True:
-                await asyncio.sleep(1)  # Keep connection alive
-        except Exception as e:
-            print("TCP device disconnected or error:", e)
-        finally:
-            # Remove device from mapping
-            for dev_id, (r, w) in list(tcp_device_connections.items()):
-                if w is writer:
-                    del tcp_device_connections[dev_id]
-                    break
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
-
-    async def tcp_server():
-        server = await asyncio.start_server(handle_device, "0.0.0.0", 12345)
-        print("TCP device server listening on 0.0.0.0:12345")
-        async with server:
-            await server.serve_forever()
-
-    asyncio.create_task(tcp_server())
-
-# Send an action to a device over TCP
-async def send_tcp_action(device_id: str, action: str, params: dict, wait_for_response: bool):
-    conn = tcp_device_connections.get(device_id)
-    print("Got conn")
-    if not conn:
-        print("Not conn!")
-        raise HTTPException(status_code=503, detail="Device not connected via TCP")
-    reader, writer = conn
-    reqid = str(uuid4())
-    params["req_id"] = reqid
-    msg = json.dumps({"action": action, "params": params})
-    msg_bytes = msg.encode()
-    length = struct.pack(">H", len(msg_bytes))
-    try:
-        writer.write(length + msg_bytes)
-        await writer.drain()
-        if wait_for_response:
-            length_bytes = await reader.readexactly(2)
-            length = struct.unpack(">H", length_bytes)[0]
-            data = await reader.readexactly(length)
-            msg = json.loads(data.decode())
-            if msg.get("action") == f"{action}_result":
-                params = msg.get("params")
-                result = params.get("result")
-                return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send action: {e}")
-
-# API endpoint to send an action to a device
-@app.post("/devices/{device_id}/action")
-async def send_device_action(
+@app.post("/devices/{device_id}/heartbeat")
+async def device_heartbeat(
     device_id: str,
-    action: dict,  # expects {"action": "toggle_on"} etc.
-    current_user: dict = Depends(auth.get_current_active_user)
+    status: dict = Body(...),
 ):
-    devices_db = get_devices_db()
-    print("got devices")
-    device = devices_db.get(device_id)
-    print("Got device!")
-    act = action.get("action", "")
-    if not device or device["owner"] != current_user["email"]:
-        print("Not device or not owner!")
-        raise HTTPException(status_code=404, detail="Device not found")
-    result = await send_tcp_action(device_id, action.get("action", ""), {}, True)
-    print(f"result of {act}: {result}")
-    return {"status": "done", "result": f"{result}"}
+    """
+    Endpoint for ESP device to send heartbeat/status updates.
+    """
+    device_status[device_id] = status
+    return {"status": "ok"}
+
+@app.post("/devices/{device_id}/action-result")
+async def device_action_result(
+    device_id: str,
+    result: dict = Body(...),
+):
+    """
+    Endpoint for ESP device to send action results.
+    """
+    # Store or process the result as needed
+    return {"status": "ok"}
+
+@app.websocket("/ws/device/{device_id}")
+async def device_ws(device_id: str, websocket: WebSocket):
+    """
+    WebSocket endpoint for ESP device to receive actions in real time.
+    """
+    await websocket.accept()
+    device_ws_connections[device_id] = websocket
+    try:
+        while True:
+            # Wait for any message from device (could be a ping or status)
+            data = await websocket.receive_text()
+            # Optionally process incoming data from device
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Remove connection on disconnect
+        if device_id in device_ws_connections:
+            del device_ws_connections[device_id]
+
+@app.post("/devices/{device_id}/send-action")
+async def send_action_to_device(
+    device_id: str,
+    action: dict = Body(...),
+):
+    """
+    Endpoint for backend/frontend to send an action to a device in real time.
+    """
+    ws = device_ws_connections.get(device_id)
+    if ws:
+        await ws.send_json(action)
+        return {"status": "sent"}
+    else:
+        return {"status": "offline", "message": "Device not connected via WebSocket"}
+
+# The rest of the API (frontend/backend) can now interact with devices via these HTTP and WebSocket endpoints.
 
 if __name__ == "__main__":
     import uvicorn

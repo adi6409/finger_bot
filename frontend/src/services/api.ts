@@ -1,6 +1,6 @@
 import useAuthStore from '../store/authStore'; // Import store to get token
 
-const API_BASE_URL = 'http://192.168.101.33:8000'; // Your FastAPI backend URL
+const API_BASE_URL = '/api'; // Backend API is now mounted under /api
 
 // Function to get the current auth token
 const getAuthToken = (): string | null => {
