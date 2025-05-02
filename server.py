@@ -27,6 +27,13 @@ SERVER_HOST = os.getenv("SERVER_HOST", "localhost:3333")
 SERVER_PORT = int(os.getenv("SERVER_PORT", 3000))
 
 # Import the backend app
+import importlib
+import sys
+
+# Add the current directory to the Python path to ensure imports work correctly
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import the backend app
 from backend.main import app as backend_app
 
 # Set SERVER_HOST in backend app state for server-info endpoint

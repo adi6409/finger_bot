@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Request
+from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import re
@@ -19,11 +20,20 @@ import backend.auth as auth
 # Assuming auth.py is in the same directory or accessible via python path
 # We will import specific items as needed later
 
-app = FastAPI(title="Finger Bot Backend")
-
 # APScheduler instance
 scheduler = AsyncIOScheduler()
-scheduler.start()
+
+# Use FastAPI lifespan to start/stop the scheduler
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start the scheduler when the app starts
+    scheduler.start()
+    yield
+    # Shutdown the scheduler when the app stops
+    scheduler.shutdown()
+
+# Create FastAPI app with lifespan
+app = FastAPI(title="Finger Bot Backend", lifespan=lifespan)
 
 def parse_repeat_to_cron(repeat: str):
     # Very basic parser: "Daily" -> every day, "Wednesdays" -> day_of_week=wed, "Weekdays" -> mon-fri
@@ -37,6 +47,41 @@ def parse_repeat_to_cron(repeat: str):
         day = m.group(1)[:3]
         return CronTrigger(day_of_week=day)
     return None  # fallback, run once
+
+# Function to send action to device via WebSocket
+async def send_tcp_action(device_id, action, metadata=None, retry=True):
+    """
+    Send an action to a device.
+    This function is called by the scheduler for scheduled actions.
+    
+    Format matches what the MicroPython code expects:
+    {
+        "action": "press",
+        "params": {...}  # Optional parameters
+    }
+    """
+    try:
+        # Get the device's WebSocket connection if available
+        ws = device_ws_connections.get(device_id)
+        if ws:
+            # If device is connected via WebSocket, send the action directly
+            # Format the message to match what the MicroPython code expects
+            await ws.send_json({
+                "action": action,
+                "params": metadata or {}  # Use "params" instead of "metadata" to match MicroPython code
+            })
+            return {"status": "sent", "method": "websocket"}
+        else:
+            # Device not connected via WebSocket
+            # Could implement HTTP fallback or other notification mechanism here
+            print(f"Device {device_id} not connected for action: {action}")
+            return {"status": "offline", "message": "Device not connected"}
+    except Exception as e:
+        print(f"Error sending action to device {device_id}: {e}")
+        if retry:
+            # Could implement retry logic here
+            pass
+        return {"status": "error", "message": str(e)}
 
 def schedule_action_job(schedule_id, device_id, action, time_str, repeat):
     hour, minute = map(int, time_str.split(":"))
@@ -584,9 +629,17 @@ async def send_action_to_device(
 ):
     """
     Endpoint for backend/frontend to send an action to a device in real time.
+    
+    Expected input format:
+    {
+        "action": "press",
+        "params": {...}  # Optional parameters
+    }
     """
     ws = device_ws_connections.get(device_id)
     if ws:
+        # Ensure the message format matches what the MicroPython code expects
+        # The action dict should already have "action" and optionally "params" fields
         await ws.send_json(action)
         return {"status": "sent"}
     else:
