@@ -106,7 +106,8 @@ origins = [
     "http://localhost:3000",  # Example for a different frontend
     "http://192.168.101.33:3000",
     "http://127.0.0.1:3000",
-    "https://rested-annually-tiger.ngrok-free.app"
+    "https://rested-annually-tiger.ngrok-free.app",
+    "https://finger.astroianu.dev"
     # Add other origins if needed (e.g., your production frontend URL)
 ]
 
