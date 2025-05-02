@@ -71,23 +71,40 @@ class BLESetup:
                 # Accumulate data in buffer
                 self._buffer += data_received
                 
-                # Check if we have a complete JSON object
-                try:
-                    # Try to parse the buffer as JSON
-                    test_json = ujson.loads(self._buffer.decode())
-                    
-                    # If we get here, we have valid JSON
-                    if self._write_callback:
-                        self._write_callback(self._buffer)
-                    else:
-                        self._payload = self._buffer
-                    
-                    # Clear buffer after successful processing
-                    self._buffer = b''
-                except ValueError:
-                    # If we get a ValueError, the JSON might be incomplete
-                    # Keep the data in the buffer for the next chunk
-                    print(f"Accumulated partial data: {self._buffer}")
+                # Print the current buffer for debugging
+                print(f"Buffer now contains: {self._buffer}")
+                
+                # Check if we have a complete JSON object by looking for closing brace
+                if b'}' in self._buffer:
+                    try:
+                        # Try to parse the buffer as JSON
+                        buffer_str = self._buffer.decode()
+                        # Find the position of the last closing brace
+                        last_brace_pos = buffer_str.rfind('}')
+                        # Extract the complete JSON string
+                        complete_json_str = buffer_str[:last_brace_pos+1]
+                        
+                        # Validate by parsing
+                        test_json = ujson.loads(complete_json_str)
+                        
+                        print(f"Complete JSON received: {complete_json_str}")
+                        
+                        # If we get here, we have valid JSON
+                        if self._write_callback:
+                            self._write_callback(complete_json_str.encode())
+                        else:
+                            self._payload = complete_json_str.encode()
+                        
+                        # Clear buffer after successful processing
+                        self._buffer = b''
+                    except ValueError as e:
+                        # If we get a ValueError, the JSON might still be incomplete
+                        # Keep the data in the buffer for the next chunk
+                        print(f"JSON parsing error: {e}")
+                        print(f"Accumulated partial data: {self._buffer}")
+                else:
+                    # No closing brace yet, keep accumulating
+                    print(f"Accumulated partial data (waiting for complete JSON): {self._buffer}")
                     
         elif event == _IRQ_GATTS_READ_REQUEST:
             # Respond to read requests with the current payload
@@ -195,15 +212,23 @@ class BLESetup:
             
             # Validate JSON before processing
             try:
-                # Check if the JSON is complete (it might be truncated)
+                # Make sure we have a complete JSON object
                 if not data.endswith('}'):
                     print("Warning: Received potentially incomplete JSON")
-                    # We'll still try to parse it, as our buffer mechanism should have
-                    # accumulated a complete JSON object
+                    # Find the last complete JSON object
+                    last_brace_pos = data.rfind('}')
+                    if last_brace_pos > 0:
+                        data = data[:last_brace_pos+1]
+                        print(f"Extracted complete JSON: {data}")
+                    else:
+                        error_msg = {"status": "error", "message": "Incomplete JSON data received"}
+                        self.send_response(error_msg)
+                        return
                 
                 command = ujson.loads(data)
                 cmd = command.get("command", "")
                 print(f"Processing command: {cmd}")
+                print(f"Full command data: {command}")
             except ValueError as e:
                 print(f"JSON parsing error: {e}")
                 error_msg = {"status": "error", "message": f"Invalid JSON format: {str(e)}"}
@@ -222,8 +247,9 @@ class BLESetup:
                 password = command.get("password", "")
                 server_host = command.get("server_host", "")
                 server_port = command.get("server_port", 12345)
+                tcp_port = command.get("tcp_port", 443)
                 
-                print(f"Configuring WiFi: SSID={ssid}, Server={server_host}:{server_port}")
+                print(f"Configuring WiFi: SSID={ssid}, Server={server_host}:{server_port}, TCP Port={tcp_port}")
                 
                 if not ssid:
                     error_msg = {"status": "error", "message": "SSID is required"}
@@ -236,7 +262,8 @@ class BLESetup:
                     "ssid": ssid,
                     "password": password,
                     "server_host": server_host,
-                    "server_port": server_port
+                    "server_port": server_port,
+                    "tcp_port": tcp_port
                 }
                 
                 # Save to persistent storage

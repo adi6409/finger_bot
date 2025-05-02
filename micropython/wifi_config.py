@@ -35,7 +35,8 @@ def load_config():
         "ssid": "",
         "password": "",
         "server_host": "",
-        "server_port": 12345
+        "server_port": 12345,
+        "tcp_port": 443
     }
 
 def is_configured():
@@ -51,5 +52,5 @@ def get_server_info():
     # The actual TCP port for device connection is provided separately
     return {
         "host": config.get("server_host", ""),
-        "port": config.get("tcp_port", 12345)  # Use tcp_port if available, otherwise fallback to default
+        "port": config.get("tcp_port", 443)  # Use tcp_port if available, otherwise fallback to default
     }

@@ -136,9 +136,12 @@ const DeviceSetupPage: React.FC = () => {
       for (let i = 0; i < encodedCommand.length; i += BLE_MTU_SIZE) {
         const chunk = encodedCommand.slice(i, i + BLE_MTU_SIZE);
         await characteristic.writeValue(chunk);
-        // Small delay between chunks to ensure they're processed in order
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Longer delay between chunks to ensure they're processed properly
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
+      
+      // Add a final delay after all chunks are sent to ensure the device has time to process
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   };
 

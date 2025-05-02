@@ -184,6 +184,13 @@ def main():
         ws_protocol = "ws"
         if str(port) == "443":
             ws_protocol = "wss"
+            
+        # Remove https:// or http:// from host if present
+        if host.startswith("https://"):
+            host = host[8:]
+        elif host.startswith("http://"):
+            host = host[7:]
+            
         ws_url = "{}://{}:{}/ws/device/{}".format(ws_protocol, host, port, device_mac)
         print("Connecting to WebSocket:", ws_url)
 
