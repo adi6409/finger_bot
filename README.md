@@ -72,3 +72,4 @@ npm run build
 
 - Wrong WiFi password on setup will cause the device to not connect to the network. The user will need to reset the device and try again.
 
+- Toast showing action failed even when the action was successful. This is a bug in the frontend code that needs to be fixed.
