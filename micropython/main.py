@@ -191,7 +191,7 @@ def main():
         elif host.startswith("http://"):
             host = host[7:]
             
-        ws_url = "{}://{}:{}/ws/device/{}".format(ws_protocol, host, port, device_mac)
+        ws_url = "{}://{}:{}/api/ws/device/{}".format(ws_protocol, host, port, device_mac)
         print("Connecting to WebSocket:", ws_url)
 
         try:
