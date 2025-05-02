@@ -97,19 +97,44 @@ def enter_setup_mode():
     ble = ble_setup.BLESetup(f"ESP32-{device_mac[-6:]}")
     ble.start()
     
+    # Variables to track setup progress
+    wifi_configured = False
+    device_registered = False
+    
     # Stay in setup mode for a limited time
     setup_start_time = time.time()
     while setup_mode and (time.time() - setup_start_time < SETUP_MODE_TIMEOUT):
-        # Check if setup is complete (WiFi configured)
-        if ble._config.get("ssid"):
+        # Check if WiFi is configured
+        if ble._config.get("ssid") and not wifi_configured:
             # Save the WiFi configuration
             wifi_config.save_config(ble._config)
             print("WiFi configuration saved")
+            
+            # Connect to WiFi in the background
+            if connect_wifi():
+                print("WiFi connected successfully")
+                wifi_configured = True
+                
+                # Change LED to indicate WiFi connected but still in setup mode
+                set_rgb(0, 255, 255)  # Cyan for WiFi connected, waiting for registration
+            else:
+                print("Failed to connect to WiFi")
+        
+        # Check if device is registered
+        if ble._device_registered:
+            print("Device registered successfully")
+            device_registered = True
             setup_mode = False
             break
         
-        # Blink LED to indicate setup mode
-        blink_rgb_led(0, 0, 255, 0.5)  # Blink blue
+        # Blink LED to indicate setup mode status
+        if wifi_configured:
+            # Blink cyan if WiFi is configured but device not registered
+            blink_rgb_led(0, 255, 255, 0.5)
+        else:
+            # Blink blue if in initial setup mode
+            blink_rgb_led(0, 0, 255, 0.5)
+            
         time.sleep(0.5)
     
     # Exit setup mode

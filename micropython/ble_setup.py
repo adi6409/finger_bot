@@ -35,6 +35,7 @@ class BLESetup:
         self._advertise(name)
         self._config = {}
         self._buffer = b''  # Buffer for accumulating partial JSON data
+        self._device_registered = False  # Flag to track device registration
         
     def _irq(self, event, data):
         # Track connections so we can send notifications
@@ -297,6 +298,24 @@ class BLESetup:
                 response = {"config": self._config}
                 print(f"Configuration: {self._config}")
                 self.send_response(response)
+                
+            elif cmd == "register_device":
+                print("Registering device...")
+                device_name = command.get("name", "")
+                
+                if not device_name:
+                    error_msg = {"status": "error", "message": "Device name is required"}
+                    print(f"Error: {error_msg}")
+                    self.send_response(error_msg)
+                    return
+                
+                # Set the device registered flag
+                self._device_registered = True
+                
+                # Send success response
+                status_msg = {"status": "success", "message": "Device registered successfully"}
+                print("Device registered successfully")
+                self.send_response(status_msg)
                 
             else:
                 error_msg = {"status": "error", "message": f"Unknown command: {cmd}"}

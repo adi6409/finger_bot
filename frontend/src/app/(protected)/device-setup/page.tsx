@@ -125,48 +125,25 @@ const DeviceSetupPage: React.FC = () => {
     // Check if the command is small enough to send in one chunk
     const encodedCommand = encoder.encode(jsonString);
     
-    try {
-      if (encodedCommand.length <= BLE_MTU_SIZE) {
-        // Small enough to send in one go
-        await characteristic.writeValue(encodedCommand);
-      } else {
-        // Need to chunk the data
-        console.log(`Command too large (${encodedCommand.length} bytes), sending in chunks`);
-        
-        // Send in chunks of BLE_MTU_SIZE bytes
-        for (let i = 0; i < encodedCommand.length; i += BLE_MTU_SIZE) {
-          const chunk = encodedCommand.slice(i, i + BLE_MTU_SIZE);
-          try {
-            await characteristic.writeValue(chunk);
-            // Longer delay between chunks to ensure they're processed properly
-            await new Promise(resolve => setTimeout(resolve, 300));
-          } catch (chunkError) {
-            // If this is a WiFi configuration command and we've sent most of the chunks,
-            // the device might disconnect after processing the command
-            if (command.command === 'configure_wifi' && i > encodedCommand.length / 2) {
-              console.log('Device disconnected while sending WiFi configuration chunks. This is expected behavior.');
-              // Return true to indicate the command was likely processed successfully
-              return true;
-            }
-            // Otherwise, rethrow the error
-            throw chunkError;
-          }
-        }
-        
-        // Add a final delay after all chunks are sent to ensure the device has time to process
-        await new Promise(resolve => setTimeout(resolve, 500));
+    if (encodedCommand.length <= BLE_MTU_SIZE) {
+      // Small enough to send in one go
+      await characteristic.writeValue(encodedCommand);
+    } else {
+      // Need to chunk the data
+      console.log(`Command too large (${encodedCommand.length} bytes), sending in chunks`);
+      
+      // Send in chunks of BLE_MTU_SIZE bytes
+      for (let i = 0; i < encodedCommand.length; i += BLE_MTU_SIZE) {
+        const chunk = encodedCommand.slice(i, i + BLE_MTU_SIZE);
+        await characteristic.writeValue(chunk);
+        // Longer delay between chunks to ensure they're processed properly
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
-      return true;
-    } catch (error) {
-      // If this is a WiFi configuration command, the device might disconnect after processing
-      if (command.command === 'configure_wifi') {
-        console.log('GATT error while sending WiFi configuration. This is expected as the device may disconnect after configuration.');
-        // Return true to indicate the command was likely processed successfully
-        return true;
-      }
-      // For other commands, rethrow the error
-      throw error;
+      
+      // Add a final delay after all chunks are sent to ensure the device has time to process
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
+    return true;
   };
 
   // Scan for WiFi networks
@@ -246,8 +223,7 @@ const DeviceSetupPage: React.FC = () => {
       console.log('Server info:', serverInfo);
 
       // Send WiFi credentials and server info to device
-      // Define configData in the outer scope so it's accessible in the catch block
-      let configData = {
+      const configData = {
         command: 'configure_wifi',
         ssid: selectedNetwork,
         password: wifiPassword,
@@ -257,25 +233,99 @@ const DeviceSetupPage: React.FC = () => {
       };
       
       console.log('Sending WiFi configuration:', configData);
-      const commandResult = await sendBleCommand(bluetoothDevice.characteristic, configData);
+      await sendBleCommand(bluetoothDevice.characteristic, configData);
       
-      if (commandResult) {
-        // The micropython logs show that the WiFi configuration is successful, but the BLE connection
-        // is disconnected immediately after. This is expected behavior as the device transitions from
-        // setup mode to normal operation.
+      // Wait for the ESP32 to process the configuration and connect to WiFi
+      console.log('Waiting for WiFi configuration to complete...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // Try to read the response with retries
+      let response = null;
+      let retries = 5;
+      let wifiConfigured = false;
+      
+      while (retries > 0 && !wifiConfigured) {
+        try {
+          // Read response
+          const value = await bluetoothDevice.characteristic.readValue();
+          const decoder = new TextDecoder();
+          const responseText = decoder.decode(value);
+          
+          if (responseText) {
+            try {
+              response = JSON.parse(responseText);
+              console.log('WiFi configuration response:', response);
+              
+              if (response.status === 'success') {
+                setSuccess('WiFi configured successfully!');
+                wifiConfigured = true;
+                break;
+              } else if (response.status === 'error') {
+                throw new Error(response.message || 'Failed to configure WiFi');
+              }
+            } catch (jsonError) {
+              console.warn(`Error parsing JSON response: ${jsonError}`);
+            }
+          }
+        } catch (readError) {
+          console.warn(`Retry ${6 - retries}/5 failed:`, readError);
+          
+          // If this is a GATT operation error, the device might have disconnected
+          // after successfully configuring WiFi
+          if (readError instanceof Error && readError.message.includes('GATT operation failed')) {
+            console.log('GATT operation error detected. Device may have disconnected after WiFi configuration.');
+            
+            // Assume success if we've sent the configuration
+            console.log('WiFi configuration was likely successful. Proceeding with setup.');
+            setSuccess('WiFi configured successfully!');
+            wifiConfigured = true;
+            break;
+          }
+        }
         
-        // Wait for the ESP32 to process the configuration and connect to WiFi
-        console.log('Waiting for WiFi configuration to complete...');
-        await new Promise(resolve => setTimeout(resolve, 30000));
-        
-        // Assume success if we got this far
-        setSuccess('WiFi configured successfully!');
+        retries--;
+        if (retries > 0) {
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
       
-      // Since the device disconnects after WiFi configuration, we can't reliably get the MAC address
-      // via BLE at this point. We'll rely on the MAC address from the URL if available.
-      if (!deviceMac) {
-        console.log('No device MAC address available from URL. Device registration may fail.');
+      // If we couldn't confirm WiFi configuration but we have a device MAC,
+      // proceed anyway as the device might have disconnected after successful configuration
+      if (!wifiConfigured && deviceMac) {
+        console.log('Could not confirm WiFi configuration, but proceeding with device MAC from URL');
+        setSuccess('WiFi configuration sent. Proceeding with setup.');
+      } else if (!wifiConfigured) {
+        throw new Error('Could not confirm WiFi configuration');
+      }
+      
+      // Get the MAC address if we don't have it yet
+      if (!deviceMac && bluetoothDevice?.device?.gatt?.connected) {
+        try {
+          console.log('Getting device MAC address...');
+          await sendBleCommand(bluetoothDevice.characteristic, { command: 'get_mac' });
+          
+          // Wait for the ESP32 to process the command
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Try to read the MAC address
+          const macValue = await bluetoothDevice.characteristic.readValue();
+          const decoder = new TextDecoder();
+          const macResponseText = decoder.decode(macValue);
+          
+          if (macResponseText) {
+            const macResponse = JSON.parse(macResponseText);
+            console.log('MAC address response:', macResponse);
+            
+            if (macResponse.mac) {
+              // Update URL with MAC address
+              router.replace(`/device-setup?mac=${macResponse.mac}`);
+            }
+          }
+        } catch (macError) {
+          console.warn('Error getting MAC address:', macError);
+          // Continue even if we can't get the MAC address
+        }
       }
       
       // Move to next step
@@ -289,7 +339,6 @@ const DeviceSetupPage: React.FC = () => {
         console.log('GATT operation error detected. This may be normal if the device disconnected after WiFi configuration.');
         
         // We know we've sent the configuration data successfully before the error
-        // since we're in the catch block after the sendBleCommand call
         console.log('WiFi configuration was sent successfully before disconnection. Proceeding with setup.');
         setSuccess('WiFi configured successfully!');
         
@@ -328,7 +377,7 @@ const DeviceSetupPage: React.FC = () => {
 
       console.log(`Registering device with MAC: ${deviceMac} and name: ${deviceName}`);
       
-      // Register device with backend
+      // First, register device with backend
       const response = await apiFetch('/devices', {
         method: 'POST',
         body: JSON.stringify({ 
@@ -344,12 +393,34 @@ const DeviceSetupPage: React.FC = () => {
 
       const device = await response.json();
       setRegisteredDeviceId(device.id);
+      
+      // If the Bluetooth device is still connected, send the registration command to the device
+      if (bluetoothDevice?.device?.gatt?.connected && bluetoothDevice?.characteristic) {
+        try {
+          console.log('Sending device registration command to device');
+          await sendBleCommand(bluetoothDevice.characteristic, {
+            command: 'register_device',
+            name: deviceName
+          });
+          
+          // Wait for the device to process the registration
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          console.log('Device registration command sent successfully');
+        } catch (bleError) {
+          console.warn('Error sending registration command to device:', bleError);
+          // Continue even if this fails, as the device is already registered in the backend
+        }
+      } else {
+        console.log('Bluetooth device not connected, skipping device-side registration');
+      }
+      
       setSuccess('Device registered successfully!');
       
       // Move to final step
       setActiveStep(3);
       
-      // Disconnect from Bluetooth device
+      // Disconnect from Bluetooth device if still connected
       if (bluetoothDevice?.device?.gatt?.connected) {
         try {
           bluetoothDevice.device.gatt.disconnect();
