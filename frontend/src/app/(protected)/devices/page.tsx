@@ -122,7 +122,7 @@ const DevicesPage: React.FC = () => {
     setError(null);
     setPressLoading(id); // Set loading state for this specific button
     try {
-      const response = await apiFetch(`/devices/${id}/action`, {
+      const response = await apiFetch(`/devices/${id}/send-action`, {
         method: "POST",
         body: JSON.stringify({ action: "press" }),
       });

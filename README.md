@@ -66,3 +66,9 @@ npm run build
 2. Modify the server.py to serve the static files from the `frontend/.next` directory instead of proxying to the development server
 
 3. Deploy the unified server behind a reverse proxy like Nginx with HTTPS enabled
+
+
+## Known Issues
+
+- Wrong WiFi password on setup will cause the device to not connect to the network. The user will need to reset the device and try again.
+
