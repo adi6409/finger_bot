@@ -65,7 +65,7 @@ npm run build
 
 2. Modify the server.py to serve the static files from the `frontend/.next` directory instead of proxying to the development server
 
-3. Deploy the unified server behind a reverse proxy like Nginx with HTTPS enabled
+3. Deploy the unified server behind a reverse proxy (I use Cloudlfare Tunnel) *WITH HTTPS* (BLE on the web does not work without HTTPS)
 
 
 ## Known Issues
