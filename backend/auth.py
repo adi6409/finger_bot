@@ -7,10 +7,17 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 # --- Configuration ---
-SECRET_KEY = "YOUR_VERY_SECRET_KEY_REPLACE_THIS"  # Replace with a strong, secret key (e.g., generated via `openssl rand -hex 32`)
+# Get secret key from environment variable or use a default for development
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "YOUR_VERY_SECRET_KEY_REPLACE_THIS")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
 # --- Password Hashing ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

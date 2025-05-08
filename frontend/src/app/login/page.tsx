@@ -1,74 +1,102 @@
-'use client'; // Mark as Client Component
+'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
-import NextLink from 'next/link'; // Use NextLink for routing
+import NextLink from 'next/link';
 import { useRouter } from 'next/navigation';
 import useAuthStore from '@/store/authStore';
-import apiFetch from '@/services/api';
+import apiFetch, { ApiError } from '@/services/api';
 
-// Import MUI components
-import Box from '@mui/material/Box';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
-import TextField from '@mui/material/TextField';
-import Button from '@mui/material/Button';
-import Typography from '@mui/material/Typography';
-import Link from '@mui/material/Link'; // Use MUI Link
-import Alert from '@mui/material/Alert';
-import Stack from '@mui/material/Stack';
+// MUI components
+import {
+  Box,
+  Card,
+  CardContent,
+  TextField,
+  Button,
+  Typography,
+  Link,
+  Alert,
+  Stack,
+  CircularProgress
+} from '@mui/material';
 
-// Define the type for our form data
-type LoginFormInputs = {
+/**
+ * Login form input type definition
+ */
+interface LoginFormInputs {
   email: string;
   password: string;
-};
+}
 
+/**
+ * Login page component
+ */
 const LoginPage: React.FC = () => {
-  // Use Controller for MUI compatibility with react-hook-form
-  const { control, handleSubmit, formState: { errors } } = useForm<LoginFormInputs>({
-    defaultValues: { email: '', password: '' }, // Set default values
+  // Form handling with react-hook-form
+  const { control, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginFormInputs>({
+    defaultValues: { email: '', password: '' },
   });
+  
+  // Auth store and routing
   const login = useAuthStore((state) => state.login);
   const router = useRouter();
+  
+  // Error state
   const [apiError, setApiError] = useState<string | null>(null);
+  
+  // Hydration state
+  const [hydrated, setHydrated] = useState(false);
+  
+  // Handle Zustand hydration
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
+  /**
+   * Form submission handler
+   */
   const onSubmit: SubmitHandler<LoginFormInputs> = async (data) => {
     setApiError(null);
+    
     try {
+      // Prepare form data for OAuth2 password flow
       const formData = new FormData();
       formData.append('username', data.email);
       formData.append('password', data.password);
 
+      // Send login request
       const response = await apiFetch('/token', {
         method: 'POST',
         body: formData,
       });
 
-      if (!response.ok) {
-         const errorData = await response.json().catch(() => ({ detail: 'Login failed. Please check your credentials.' }));
-         throw new Error(errorData.detail || 'Login failed');
-      }
-
+      // Parse response
       const tokenData: { access_token: string; token_type: string } = await response.json();
 
+      // Update auth store and redirect
       login(data.email, tokenData.access_token);
-      router.push('/'); // Redirect to home page
-
+      router.push('/');
+      
     } catch (error) {
       console.error('Login error:', error);
-      setApiError(error instanceof Error ? error.message : 'An unexpected error occurred.');
+      
+      // Handle API errors
+      if (error instanceof ApiError) {
+        setApiError(error.message);
+      } else {
+        setApiError('An unexpected error occurred. Please try again.');
+      }
     }
   };
 
-  // Handle Zustand hydration
-  const [isClient, setIsClient] = React.useState(false);
-  React.useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  if (!isClient) {
-    return null; // Or a loading indicator
+  // Show loading state during hydration
+  if (!hydrated) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
   }
 
   return (
@@ -77,16 +105,18 @@ const LoginPage: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: 'calc(100vh - 64px)', // Adjust based on AppBar height (default is 64px)
+        minHeight: 'calc(100vh - 64px)',
       }}
     >
       <Card sx={{ maxWidth: 400, width: '100%', p: 1 }}>
         <CardContent>
-          <Typography variant="h5" component="h2" gutterBottom align="center">
+          <Typography variant="h5" component="h1" gutterBottom align="center">
             Login
           </Typography>
+          
           <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate sx={{ mt: 1 }}>
-            <Stack spacing={2}> {/* Use Stack for spacing form elements */}
+            <Stack spacing={2}>
+              {/* Email field */}
               <Controller
                 name="email"
                 control={control}
@@ -109,6 +139,8 @@ const LoginPage: React.FC = () => {
                   />
                 )}
               />
+              
+              {/* Password field */}
               <Controller
                 name="password"
                 control={control}
@@ -133,16 +165,25 @@ const LoginPage: React.FC = () => {
                 )}
               />
 
-              {apiError && <Alert severity="error" sx={{ width: '100%' }}>{apiError}</Alert>}
+              {/* Error alert */}
+              {apiError && (
+                <Alert severity="error" sx={{ width: '100%' }}>
+                  {apiError}
+                </Alert>
+              )}
 
+              {/* Submit button */}
               <Button
                 type="submit"
                 fullWidth
                 variant="contained"
-                sx={{ mt: 2, mb: 1 }} // Add margin top/bottom
+                disabled={isSubmitting}
+                sx={{ mt: 2, mb: 1 }}
               >
-                Sign In
+                {isSubmitting ? <CircularProgress size={24} /> : 'Sign In'}
               </Button>
+              
+              {/* Register link */}
               <Typography variant="body2" align="center">
                 <Link component={NextLink} href="/register" passHref underline="hover">
                   {"Don't have an account? Register"}

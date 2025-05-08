@@ -1,33 +1,73 @@
-from sqlalchemy import Column, String, Boolean, ForeignKey, Integer
-from sqlalchemy.orm import relationship
-from backend.db import Base
+"""
+Pydantic models for the Finger Bot backend.
+"""
 
-class User(Base):
-    __tablename__ = "users"
-    email = Column(String, primary_key=True, index=True)
-    hashed_password = Column(String, nullable=False)
-    is_active = Column(Boolean, default=True)
+from pydantic import BaseModel, EmailStr
+from typing import Optional, Literal
 
-    devices = relationship("Device", back_populates="owner_rel")
-    schedules = relationship("Schedule", back_populates="owner_rel")
+# --- User Models ---
 
-class Device(Base):
-    __tablename__ = "devices"
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    owner = Column(String, ForeignKey("users.email"), nullable=False)
+class UserCreate(BaseModel):
+    """Model for user registration data."""
+    email: EmailStr
+    password: str  # Frontend calls it password_needs_at_least_8_chars
 
-    owner_rel = relationship("User", back_populates="devices")
-    schedules = relationship("Schedule", back_populates="device_rel")
+class UserInDB(BaseModel):
+    """Model for user data stored in the database."""
+    email: EmailStr
+    hashed_password: str
 
-class Schedule(Base):
-    __tablename__ = "schedules"
-    id = Column(String, primary_key=True, index=True)
-    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
-    owner = Column(String, ForeignKey("users.email"), nullable=False)
-    action = Column(String, nullable=False)
-    time = Column(String, nullable=False)  # "HH:MM"
-    repeat = Column(String, nullable=False)
+class UserPublic(BaseModel):
+    """Model for user data returned to clients."""
+    email: EmailStr
 
-    device_rel = relationship("Device", back_populates="schedules")
-    owner_rel = relationship("User", back_populates="schedules")
+# --- Device Models ---
+
+class DeviceCreate(BaseModel):
+    """Model for device creation data."""
+    name: str
+    device_id: Optional[str] = None
+
+class DeviceInDB(BaseModel):
+    """Model for device data stored in the database."""
+    id: str
+    name: str
+    owner: str  # email of the user who registered the device
+
+class DevicePublic(BaseModel):
+    """Model for device data returned to clients."""
+    id: str
+    name: str
+
+class DeviceSetupInfo(BaseModel):
+    """Model for device setup information."""
+    ssid: str
+    password: str
+    server_host: str
+    server_port: int = 12345
+
+# --- Schedule Models ---
+
+class ScheduleCreate(BaseModel):
+    """Model for schedule creation data."""
+    device_id: str
+    action: Literal["press"]
+    time: str  # "HH:MM" format
+    repeat: str  # e.g., "Wednesdays", "Daily", "Weekdays"
+
+class ScheduleInDB(BaseModel):
+    """Model for schedule data stored in the database."""
+    id: str
+    device_id: str
+    owner: str
+    action: str
+    time: str
+    repeat: str
+
+class SchedulePublic(BaseModel):
+    """Model for schedule data returned to clients."""
+    id: str
+    device_id: str
+    action: str
+    time: str
+    repeat: str
