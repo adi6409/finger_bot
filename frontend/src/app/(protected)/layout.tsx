@@ -1,9 +1,14 @@
-'use client'; // This layout needs to be a Client Component to use hooks
+'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useAuthStore from '@/store/authStore';
+import { Box, CircularProgress } from '@mui/material';
 
+/**
+ * Protected layout component that ensures users are authenticated
+ * Redirects to login page if not authenticated
+ */
 export default function ProtectedLayout({
   children,
 }: {
@@ -11,27 +16,43 @@ export default function ProtectedLayout({
 }) {
   const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
   const router = useRouter();
-
-  // Handle Zustand hydration and initial check
-  const [isClient, setIsClient] = React.useState(false);
+  
+  // State to track client-side hydration
+  const [hydrated, setHydrated] = useState(false);
+  
+  // Handle Zustand hydration
   useEffect(() => {
-    setIsClient(true);
+    setHydrated(true);
   }, []);
-
+  
+  // Authentication check and redirect
   useEffect(() => {
-    // Only run the check on the client-side after hydration
-    if (isClient && !isLoggedIn) {
-      router.replace('/login'); // Redirect to login if not authenticated
+    if (hydrated && !isLoggedIn) {
+      router.replace('/login');
     }
-  }, [isClient, isLoggedIn, router]);
-
-  // Render children only if logged in (or during initial client render before check)
-  // This prevents flashing the protected content briefly before redirecting
-  if (!isClient || !isLoggedIn) {
-    // Optionally return a loading spinner or null while checking/redirecting
+  }, [hydrated, isLoggedIn, router]);
+  
+  // Show loading state during hydration
+  if (!hydrated) {
+    return (
+      <Box 
+        sx={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          height: '100vh' 
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+  
+  // Don't render protected content if not logged in
+  if (!isLoggedIn) {
     return null;
   }
-
-  // If logged in, render the actual page content
+  
+  // Render children if authenticated
   return <>{children}</>;
 }

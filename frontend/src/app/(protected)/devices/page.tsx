@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import apiFetch from '@/services/api';
+import Link from 'next/link';
 
 // Import MUI components
 import Box from '@mui/material/Box';
@@ -20,6 +21,7 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress'; // For loading state
 import Stack from '@mui/material/Stack'; // For layout
 import Snackbar from '@mui/material/Snackbar'; // For toasts/notifications
+import Divider from '@mui/material/Divider';
 
 // Import MUI Icons
 import EditIcon from '@mui/icons-material/Edit';
@@ -27,6 +29,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Cancel';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'; // For 'Press' action
+import AddIcon from '@mui/icons-material/Add'; // For adding new device
 
 type Device = {
   id: string;
@@ -43,7 +46,6 @@ const DevicesPage: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
-
 
   // Fetch devices on mount
   useEffect(() => {
@@ -120,7 +122,7 @@ const DevicesPage: React.FC = () => {
     setError(null);
     setPressLoading(id); // Set loading state for this specific button
     try {
-      const response = await apiFetch(`/devices/${id}/action`, {
+      const response = await apiFetch(`/devices/${id}/send-action`, {
         method: "POST",
         body: JSON.stringify({ action: "press" }),
       });
@@ -147,13 +149,32 @@ const DevicesPage: React.FC = () => {
   };
 
   return (
-    <> {/* Add opening fragment tag */}
-      <Paper sx={{ p: 3, maxWidth: 'md', margin: 'auto' }}> {/* Use Paper as a container */}
+    <>
+      <Paper sx={{ p: 3, maxWidth: 'md', margin: 'auto' }}>
         <Typography variant="h5" component="h2" gutterBottom color="primary">
           Manage Devices
-      </Typography>
-
-      <Box component="form" onSubmit={handleCreateDevice} sx={{ display: 'flex', gap: 1, mb: 2 }}>
+        </Typography>
+        
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h6">Your Devices</Typography>
+          <Button 
+            component={Link}
+            href="/device-setup"
+            variant="contained" 
+            color="primary"
+            startIcon={<AddIcon />}
+          >
+            Setup New Device
+          </Button>
+        </Box>
+        
+        <Divider sx={{ mb: 3 }} />
+        
+        <Typography variant="subtitle1" gutterBottom>
+          Register Device Manually
+        </Typography>
+        
+        <Box component="form" onSubmit={handleCreateDevice} sx={{ display: 'flex', gap: 1, mb: 3 }}>
         <TextField
           label="New Device Name"
           variant="outlined"
@@ -180,7 +201,7 @@ const DevicesPage: React.FC = () => {
           <CircularProgress />
         </Box>
       ) : (
-        <TableContainer component={Paper} variant="outlined"> {/* Wrap table */}
+        <TableContainer component={Paper} variant="outlined">
           <Table sx={{ minWidth: 650 }} aria-label="devices table">
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 'bold' } }}>
@@ -286,7 +307,7 @@ const DevicesPage: React.FC = () => {
           {snackbarMessage}
         </Alert>
       </Snackbar>
-    </> // Keep closing fragment tag
+    </>
   );
 };
 

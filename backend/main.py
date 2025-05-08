@@ -1,30 +1,56 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-import re
+"""
+FastAPI backend for Finger Bot application.
+Provides API endpoints for user authentication, device management, and scheduling.
+"""
+
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Body, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
-from datetime import timedelta
-from typing import Dict, Any, Optional # Import Dict and Any for type hinting
-import qrcode
-import io
-from fastapi.responses import StreamingResponse
-
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from datetime import timedelta, datetime
+from typing import Dict, Any, Optional, List
+from uuid import uuid4
+import re
 from backend.jsondb import get_collection, set_collection
 import backend.auth as auth
-
-# Assuming auth.py is in the same directory or accessible via python path
-# We will import specific items as needed later
-
-app = FastAPI(title="Finger Bot Backend")
+from backend.models import (
+    UserCreate, UserInDB, UserPublic,
+    DeviceCreate, DeviceInDB, DevicePublic, DeviceSetupInfo,
+    ScheduleCreate, ScheduleInDB, SchedulePublic
+)
 
 # APScheduler instance
 scheduler = AsyncIOScheduler()
-scheduler.start()
 
-def parse_repeat_to_cron(repeat: str):
-    # Very basic parser: "Daily" -> every day, "Wednesdays" -> day_of_week=wed, "Weekdays" -> mon-fri
+# Use FastAPI lifespan to start/stop the scheduler
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start the scheduler when the app starts
+    scheduler.start()
+    yield
+    # Shutdown the scheduler when the app stops
+    scheduler.shutdown()
+
+# Create FastAPI app with lifespan
+app = FastAPI(
+    title="Finger Bot Backend",
+    description="API for Finger Bot device management and scheduling",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+def parse_repeat_to_cron(repeat: str) -> Optional[CronTrigger]:
+    """
+    Convert a human-readable repeat pattern to a CronTrigger.
+    
+    Args:
+        repeat: String like "Daily", "Weekdays", or "Wednesdays"
+        
+    Returns:
+        CronTrigger object or None if pattern not recognized
+    """
     repeat = repeat.lower()
     if repeat == "daily":
         return CronTrigger()
@@ -36,128 +62,162 @@ def parse_repeat_to_cron(repeat: str):
         return CronTrigger(day_of_week=day)
     return None  # fallback, run once
 
-def schedule_action_job(schedule_id, device_id, action, time_str, repeat):
+async def send_tcp_action(device_id: str, action: str, metadata: Optional[Dict[str, Any]] = None, retry: bool = True) -> Dict[str, Any]:
+    """
+    Send an action to a device via WebSocket.
+    This function is called by the scheduler for scheduled actions.
+    
+    Args:
+        device_id: The ID of the device to send the action to
+        action: The action to perform (e.g., "press")
+        metadata: Optional parameters for the action
+        retry: Whether to retry on failure
+        
+    Returns:
+        Dict with status information
+    
+    Format matches what the MicroPython code expects:
+    {
+        "action": "press",
+        "params": {...}  # Optional parameters
+    }
+    """
+    try:
+        # Get the device's WebSocket connection if available
+        ws = device_ws_connections.get(device_id)
+        if ws:
+            # If device is connected via WebSocket, send the action directly
+            # Format the message to match what the MicroPython code expects
+            await ws.send_json({
+                "action": action,
+                "params": metadata or {}  # Use "params" instead of "metadata" to match MicroPython code
+            })
+            return {"status": "sent", "method": "websocket"}
+        else:
+            # Device not connected via WebSocket
+            print(f"Device {device_id} not connected for action: {action}")
+            return {"status": "offline", "message": "Device not connected"}
+    except Exception as e:
+        print(f"Error sending action to device {device_id}: {e}")
+        if retry:
+            # Could implement retry logic here
+            pass
+        return {"status": "error", "message": str(e)}
+
+def schedule_action_job(schedule_id: str, device_id: str, action: str, time_str: str, repeat: str) -> None:
+    """
+    Schedule a job to send an action to a device at a specific time.
+    
+    Args:
+        schedule_id: Unique ID for the schedule
+        device_id: The ID of the device to send the action to
+        action: The action to perform (e.g., "press")
+        time_str: Time in "HH:MM" format
+        repeat: Repeat pattern (e.g., "Daily", "Weekdays")
+    """
     hour, minute = map(int, time_str.split(":"))
     trigger = parse_repeat_to_cron(repeat)
+    
     if trigger is None:
-        # fallback: run once at the next occurrence of the time
-        from datetime import datetime, timedelta
+        # Fallback: run once at the next occurrence of the time
         now = datetime.now()
         run_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if run_time < now:
             run_time += timedelta(days=1)
-        scheduler.add_job(send_tcp_action, "date", run_date=run_time, args=[device_id, action, {"scheduled": True}, False], id=schedule_id, replace_existing=True)
+        scheduler.add_job(
+            send_tcp_action, 
+            "date", 
+            run_date=run_time, 
+            args=[device_id, action, {"scheduled": True}, False], 
+            id=schedule_id, 
+            replace_existing=True
+        )
     else:
-        print(f"trigger is none, will schedule to {hour}:{minute}")
-        scheduler.add_job(send_tcp_action, trigger, args=[device_id, action, {"scheduled": True}, False], id=schedule_id, replace_existing=True, hour=hour, minute=minute)
+        scheduler.add_job(
+            send_tcp_action, 
+            trigger, 
+            args=[device_id, action, {"scheduled": True}, False], 
+            id=schedule_id, 
+            replace_existing=True, 
+            hour=hour, 
+            minute=minute
+        )
 
 # Configure CORS
 origins = [
-    "http://localhost:5173",  # Default Vite dev server port
+    # Development servers
+    "http://localhost:5173",  # Vite dev server
     "http://127.0.0.1:5173",
-    "http://192.168.101.33:5173",
-    "http://localhost:3000",  # Example for a different frontend
-    "http://192.168.101.33:3000",
+    "http://localhost:3000",  # Next.js dev server
     "http://127.0.0.1:3000",
-    # Add other origins if needed (e.g., your production frontend URL)
+    
+    # Local network testing
+    "http://192.168.101.33:5173",
+    "http://192.168.101.33:3000",
+    
+    # Production domains
+    "https://rested-annually-tiger.ngrok-free.app",
+    "https://finger.astroianu.dev"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
+# --- JSON "DB" storage functions ---
+
+def get_users_db() -> Dict[str, Any]:
+    """Get the users collection from the JSON database."""
+    return get_collection("users")
+
+def set_users_db(data: Dict[str, Any]) -> None:
+    """Save the users collection to the JSON database."""
+    set_collection("users", data)
+
+def get_devices_db() -> Dict[str, Any]:
+    """Get the devices collection from the JSON database."""
+    return get_collection("devices")
+
+def set_devices_db(data: Dict[str, Any]) -> None:
+    """Save the devices collection to the JSON database."""
+    set_collection("devices", data)
+
+def get_schedules_db() -> Dict[str, Any]:
+    """Get the schedules collection from the JSON database."""
+    return get_collection("schedules")
+
+def set_schedules_db(data: Dict[str, Any]) -> None:
+    """Save the schedules collection to the JSON database."""
+    set_collection("schedules", data)
+
+# --- API Routes ---
 
 @app.get("/")
 async def read_root():
+    """Root endpoint that returns a welcome message."""
     return {"message": "Welcome to the Finger Bot Backend"}
-
-# --- Pydantic Models for User Data ---
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str # Frontend calls it password_needs_at_least_8_chars
-
-class UserInDB(BaseModel):
-    email: EmailStr
-    hashed_password: str
-
-class UserPublic(BaseModel):
-    email: EmailStr
-
-# --- JSON "DB" storage ---
-
-def get_users_db():
-    return get_collection("users")
-
-def set_users_db(data):
-    set_collection("users", data)
-
-def get_devices_db():
-    return get_collection("devices")
-
-def set_devices_db(data):
-    set_collection("devices", data)
-
-def get_schedules_db():
-    return get_collection("schedules")
-
-def set_schedules_db(data):
-    set_collection("schedules", data)
-from uuid import uuid4
-
-class DeviceCreate(BaseModel):
-    name: str
-    device_id: Optional[str] = None
-
-class DeviceInDB(BaseModel):
-    id: str
-    name: str
-    owner: str  # email of the user who registered the device
-
-class DevicePublic(BaseModel):
-    id: str
-    name: str
-
-class DeviceSetupInfo(BaseModel):
-    ssid: str
-    password: str
-    server_host: str
-    server_port: int = 12345
-
-fake_devices_db: Dict[str, DeviceInDB] = {}
-from datetime import time
-
-from typing import Literal
-class ScheduleCreate(BaseModel):
-    device_id: str
-    action: Literal["press"]
-    time: str  # "HH:MM" format
-    repeat: str  # e.g., "Wednesdays", "Daily", "Weekdays"
-
-class ScheduleInDB(BaseModel):
-    id: str
-    device_id: str
-    owner: str
-    action: str
-    time: str
-    repeat: str
-
-class SchedulePublic(BaseModel):
-    id: str
-    device_id: str
-    action: str
-    time: str
-    repeat: str
-
-fake_schedules_db: Dict[str, ScheduleInDB] = {}
 
 
 # --- Authentication Endpoints ---
 
 @app.post("/register", response_model=UserPublic)
 async def register_user(user: UserCreate):
+    """
+    Register a new user with email and password.
+    
+    Args:
+        user: User creation data with email and password
+        
+    Returns:
+        The created user's public information
+        
+    Raises:
+        HTTPException: If the email is already registered
+    """
     users_db = get_users_db()
     if user.email in users_db:
         raise HTTPException(
@@ -172,6 +232,18 @@ async def register_user(user: UserCreate):
 
 @app.post("/token", response_model=auth.Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    """
+    Authenticate a user and return an access token.
+    
+    Args:
+        form_data: OAuth2 form with username (email) and password
+        
+    Returns:
+        Access token for the authenticated user
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
     users_db = get_users_db()
     user = users_db.get(form_data.username)
     if not user or not auth.verify_password(form_data.password, user["hashed_password"]):
@@ -188,35 +260,136 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 
 # Dependency override for auth
 async def override_get_user_db():
+    """Override the auth module's get_user_db function to use our JSON DB."""
     return get_users_db()
 
 app.dependency_overrides[auth.get_user_db] = override_get_user_db
 
 @app.get("/users/me", response_model=UserPublic)
 async def read_users_me(current_user: dict = Depends(auth.get_current_active_user)):
+    """
+    Get the current authenticated user's information.
+    
+    Args:
+        current_user: The authenticated user from the token
+        
+    Returns:
+        The user's public information
+    """
     return UserPublic(email=current_user["email"])
 
 
 # --- Device Management Endpoints ---
-
-from fastapi import Security
 
 @app.post("/devices", response_model=DevicePublic)
 async def create_device(
     device: DeviceCreate,
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    Register a new device for the authenticated user.
+    
+    Args:
+        device: Device creation data with name and optional device_id
+        current_user: The authenticated user
+        
+    Returns:
+        The created device's public information
+        
+    Raises:
+        HTTPException: If the device ID is already registered
+    """
     devices_db = get_devices_db()
-    device_id = str(uuid4())
+    
+    # Use provided device_id (MAC address) or generate a new UUID
+    device_id = device.device_id if device.device_id else str(uuid4())
+    
+    # Check if device_id already exists
+    for existing_device in devices_db.values():
+        if existing_device.get("id") == device_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device ID already registered",
+            )
+    
     device_in_db = {"id": device_id, "name": device.name, "owner": current_user["email"]}
     devices_db[device_id] = device_in_db
     set_devices_db(devices_db)
     return DevicePublic(id=device_id, name=device.name)
 
+# --- Device Setup Endpoints ---
+
+@app.get("/server-info")
+async def get_server_info(
+    request: Request,
+    current_user: dict = Depends(auth.get_current_active_user)
+):
+    """Get server information for device setup"""
+    # Check if SERVER_HOST is set in app state (passed from server.py)
+    if hasattr(app.state, 'server_host'):
+        # Parse the SERVER_HOST value which is in format "hostname" or "hostname:port"
+        server_host = app.state.server_host
+        if hasattr(app.state, 'server_port'):
+            host = server_host
+            port = app.state.server_port
+        elif ':' in server_host:
+            host, port_str = server_host.split(':', 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                port = 12345  # Default port if parsing fails
+        else:
+            host = server_host
+            port = 12345  # Default port if not specified
+            
+        return {
+            "host": host,
+            "port": port
+        }
+    
+    # Fallback to original behavior if server_host is not set
+    # Use the address the client used to reach the backend (e.g., ngrok domain)
+    base_url = str(request.base_url)
+    # Remove trailing slash if present
+    if base_url.endswith("/"):
+        base_url = base_url[:-1]
+    # Extract host (and port if present)
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    host = parsed.hostname
+    port = parsed.port
+
+    # Check if we're running as part of the unified server
+    from fastapi import FastAPI
+    import inspect
+
+    frame = inspect.currentframe()
+    while frame:
+        if 'app' in frame.f_locals and isinstance(frame.f_locals['app'], FastAPI) and hasattr(frame.f_locals['app'], 'state') and hasattr(frame.f_locals['app'].state, 'tcp_port'):
+            return {
+                "host": host,
+                "port": frame.f_locals['app'].state.tcp_port
+            }
+        frame = frame.f_back
+
+    return {
+        "host": host,
+        "port": port if port else 12345  # Use port from URL if present, else default
+    }
+
 @app.get("/devices", response_model=list[DevicePublic])
 async def list_devices(
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    List all devices belonging to the authenticated user.
+    
+    Args:
+        current_user: The authenticated user
+        
+    Returns:
+        List of devices owned by the user
+    """
     devices_db = get_devices_db()
     return [
         DevicePublic(id=d["id"], name=d["name"])
@@ -229,6 +402,19 @@ async def get_device(
     device_id: str,
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    Get a specific device by ID.
+    
+    Args:
+        device_id: The ID of the device to retrieve
+        current_user: The authenticated user
+        
+    Returns:
+        The device's public information
+        
+    Raises:
+        HTTPException: If the device is not found or doesn't belong to the user
+    """
     devices_db = get_devices_db()
     device = devices_db.get(device_id)
     if not device or device["owner"] != current_user["email"]:
@@ -241,6 +427,20 @@ async def update_device(
     device_update: DeviceCreate,
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    Update a device's information.
+    
+    Args:
+        device_id: The ID of the device to update
+        device_update: The updated device data
+        current_user: The authenticated user
+        
+    Returns:
+        The updated device's public information
+        
+    Raises:
+        HTTPException: If the device is not found or doesn't belong to the user
+    """
     devices_db = get_devices_db()
     device = devices_db.get(device_id)
     if not device or device["owner"] != current_user["email"]:
@@ -255,6 +455,19 @@ async def delete_device(
     device_id: str,
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    Delete a device.
+    
+    Args:
+        device_id: The ID of the device to delete
+        current_user: The authenticated user
+        
+    Returns:
+        No content on successful deletion
+        
+    Raises:
+        HTTPException: If the device is not found or doesn't belong to the user
+    """
     devices_db = get_devices_db()
     device = devices_db.get(device_id)
     if not device or device["owner"] != current_user["email"]:
@@ -263,8 +476,6 @@ async def delete_device(
     set_devices_db(devices_db)
     return
 
-# --- TODO: Add Schedule Management Endpoints ---
-
 # --- Schedule Management Endpoints ---
 
 @app.post("/schedules", response_model=SchedulePublic)
@@ -272,6 +483,19 @@ async def create_schedule(
     schedule: ScheduleCreate,
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    Create a new schedule for a device.
+    
+    Args:
+        schedule: Schedule creation data with device_id, action, time, and repeat pattern
+        current_user: The authenticated user
+        
+    Returns:
+        The created schedule's public information
+        
+    Raises:
+        HTTPException: If the device is not found or doesn't belong to the user
+    """
     devices_db = get_devices_db()
     schedules_db = get_schedules_db()
     device = devices_db.get(schedule.device_id)
@@ -302,6 +526,15 @@ async def create_schedule(
 async def list_schedules(
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    List all schedules belonging to the authenticated user.
+    
+    Args:
+        current_user: The authenticated user
+        
+    Returns:
+        List of schedules owned by the user
+    """
     schedules_db = get_schedules_db()
     return [
         SchedulePublic(
@@ -320,6 +553,19 @@ async def get_schedule(
     schedule_id: str,
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    Get a specific schedule by ID.
+    
+    Args:
+        schedule_id: The ID of the schedule to retrieve
+        current_user: The authenticated user
+        
+    Returns:
+        The schedule's public information
+        
+    Raises:
+        HTTPException: If the schedule is not found or doesn't belong to the user
+    """
     schedules_db = get_schedules_db()
     schedule = schedules_db.get(schedule_id)
     if not schedule or schedule["owner"] != current_user["email"]:
@@ -338,6 +584,20 @@ async def update_schedule(
     schedule_update: ScheduleCreate,
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    Update a schedule's information.
+    
+    Args:
+        schedule_id: The ID of the schedule to update
+        schedule_update: The updated schedule data
+        current_user: The authenticated user
+        
+    Returns:
+        The updated schedule's public information
+        
+    Raises:
+        HTTPException: If the schedule or device is not found or doesn't belong to the user
+    """
     schedules_db = get_schedules_db()
     devices_db = get_devices_db()
     schedule = schedules_db.get(schedule_id)
@@ -367,6 +627,19 @@ async def delete_schedule(
     schedule_id: str,
     current_user: dict = Depends(auth.get_current_active_user)
 ):
+    """
+    Delete a schedule.
+    
+    Args:
+        schedule_id: The ID of the schedule to delete
+        current_user: The authenticated user
+        
+    Returns:
+        No content on successful deletion
+        
+    Raises:
+        HTTPException: If the schedule is not found or doesn't belong to the user
+    """
     schedules_db = get_schedules_db()
     schedule = schedules_db.get(schedule_id)
     if not schedule or schedule["owner"] != current_user["email"]:
@@ -380,115 +653,81 @@ async def delete_schedule(
         pass
     return
 
-# --- TCP Device Communication Logic ---
+# --- Device HTTP & WebSocket Communication Logic ---
 
-import asyncio
-import socket
-import struct
-import json
+# In-memory mappings
+device_status: Dict[str, Dict[str, Any]] = {}  # device_id -> last known status
+device_ws_connections: Dict[str, WebSocket] = {}  # device_id -> WebSocket connection
 
-# In-memory mapping: device_id -> TCP connection info
-tcp_device_connections = {}  # device_id: (reader, writer)
-
-# Start a background task to accept TCP device connections
-@app.on_event("startup")
-async def start_tcp_server():
-    # On startup, load all schedules and add jobs
-    schedules_db = get_schedules_db()
-    for s in schedules_db.values():
-        try:
-            schedule_action_job(s["id"], s["device_id"], s["action"], s["time"], s["repeat"])
-        except Exception as e:
-            print(f"Failed to schedule job for {s['id']}: {e}")
-
-    async def handle_device(reader, writer):
-        # For demo: expect device to send its device_id as the first message
-        try:
-            # Read length-prefixed JSON
-            length_bytes = await reader.readexactly(2)
-            length = struct.unpack(">H", length_bytes)[0]
-            data = await reader.readexactly(length)
-            msg = json.loads(data.decode())
-            device_id = msg.get("device_id")
-            if not device_id:
-                writer.close()
-                await writer.wait_closed()
-                return
-            tcp_device_connections[device_id] = (reader, writer)
-            print(f"Device {device_id} connected via TCP")
-            while True:
-                await asyncio.sleep(1)  # Keep connection alive
-        except Exception as e:
-            print("TCP device disconnected or error:", e)
-        finally:
-            # Remove device from mapping
-            for dev_id, (r, w) in list(tcp_device_connections.items()):
-                if w is writer:
-                    del tcp_device_connections[dev_id]
-                    break
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
-
-    async def tcp_server():
-        server = await asyncio.start_server(handle_device, "0.0.0.0", 12345)
-        print("TCP device server listening on 0.0.0.0:12345")
-        async with server:
-            await server.serve_forever()
-
-    asyncio.create_task(tcp_server())
-
-# Send an action to a device over TCP
-async def send_tcp_action(device_id: str, action: str, params: dict, wait_for_response: bool):
-    conn = tcp_device_connections.get(device_id)
-    print("Got conn")
-    if not conn:
-        print("Not conn!")
-        raise HTTPException(status_code=503, detail="Device not connected via TCP")
-    reader, writer = conn
-    reqid = str(uuid4())
-    params["req_id"] = reqid
-    msg = json.dumps({"action": action, "params": params})
-    msg_bytes = msg.encode()
-    length = struct.pack(">H", len(msg_bytes))
-    try:
-        writer.write(length + msg_bytes)
-        await writer.drain()
-        if wait_for_response:
-            length_bytes = await reader.readexactly(2)
-            length = struct.unpack(">H", length_bytes)[0]
-            data = await reader.readexactly(length)
-            msg = json.loads(data.decode())
-            if msg.get("action") == f"{action}_result":
-                params = msg.get("params")
-                result = params.get("result")
-                return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send action: {e}")
-
-# API endpoint to send an action to a device
-@app.post("/devices/{device_id}/action")
-async def send_device_action(
+@app.post("/devices/{device_id}/heartbeat")
+async def device_heartbeat(
     device_id: str,
-    action: dict,  # expects {"action": "toggle_on"} etc.
-    current_user: dict = Depends(auth.get_current_active_user)
+    status: dict = Body(...),
 ):
-    devices_db = get_devices_db()
-    print("got devices")
-    device = devices_db.get(device_id)
-    print("Got device!")
-    act = action.get("action", "")
-    if not device or device["owner"] != current_user["email"]:
-        print("Not device or not owner!")
-        raise HTTPException(status_code=404, detail="Device not found")
-    result = await send_tcp_action(device_id, action.get("action", ""), {}, True)
-    print(f"result of {act}: {result}")
-    return {"status": "done", "result": f"{result}"}
+    """
+    Endpoint for ESP device to send heartbeat/status updates.
+    """
+    # TODO: Move heartbeat logic from device to wss
+    device_status[device_id] = status
+    return {"status": "ok"}
+
+@app.post("/devices/{device_id}/action-result")
+async def device_action_result(
+    device_id: str,
+    result: dict = Body(...),
+):
+    """
+    Endpoint for ESP device to send action results.
+    """
+    # Store or process the result as needed
+    # TODO: Handle action results
+    return {"status": "ok"}
+
+@app.websocket("/ws/device/{device_id}")
+async def device_ws(device_id: str, websocket: WebSocket):
+    """
+    WebSocket endpoint for ESP device to receive actions in real time.
+    """
+    await websocket.accept()
+    device_ws_connections[device_id] = websocket
+    try:
+        while True:
+            # Wait for any message from device (could be a ping or status)
+            data = await websocket.receive_text()
+            # Optionally process incoming data from device
+            # TODO: Handle incoming messages from device
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Remove connection on disconnect
+        if device_id in device_ws_connections:
+            del device_ws_connections[device_id]
+
+@app.post("/devices/{device_id}/send-action")
+async def send_action_to_device(
+    device_id: str,
+    action: dict = Body(...),
+):
+    """
+    Endpoint for backend/frontend to send an action to a device in real time.
+    
+    Expected input format:
+    {
+        "action": "press",
+        "params": {...}  # Optional parameters
+    }
+    """
+    ws = device_ws_connections.get(device_id)
+    if ws:
+        # Ensure the message format matches what the MicroPython code expects
+        # The action dict should already have "action" and optionally "params" fields
+        await ws.send_json(action)
+        return {"status": "sent"}
+    else:
+        return {"status": "offline", "message": "Device not connected via WebSocket"}
 
 if __name__ == "__main__":
     import uvicorn
     # Note: Running directly like this is mainly for simple testing.
-    # Use `uvicorn backend.main:app --reload` from the project root for development.
+    # Use `python server.py` to run the unified server.
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level=3)

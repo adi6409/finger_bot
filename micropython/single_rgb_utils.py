@@ -4,6 +4,10 @@ RED_PIN = 17
 GREEN_PIN = 19
 BLUE_PIN = 20
 
+# RED_PIN = 39
+# GREEN_PIN = 38
+# BLUE_PIN = 37
+
 red = Pin(RED_PIN, Pin.OUT)
 green = Pin(GREEN_PIN, Pin.OUT)
 blue = Pin(BLUE_PIN, Pin.OUT)
