@@ -25,6 +25,7 @@ from backend.models import (
 # ——————————————————————————————
 local_tz = timezone("Asia/Jerusalem")
 scheduler = AsyncIOScheduler(timezone=local_tz)
+scheduler.start()  # start immediately so jobs won't be added "tentatively"
 logger = logging.getLogger("fingerbot")
 logging.basicConfig(level=logging.INFO)
 
@@ -33,18 +34,13 @@ device_status: Dict[str, Dict[str, Any]] = {}            # device_id -> last kno
 device_ws_connections: Dict[str, WebSocket] = {}         # device_id -> WebSocket connection
 
 # ——————————————————————————————
-# FastAPI app with startup/shutdown hooks
+# FastAPI app with shutdown hook
 # ——————————————————————————————
 app = FastAPI(
     title="Finger Bot Backend",
     description="API for Finger Bot device management and scheduling",
     version="1.0.0",
 )
-
-@app.on_event("startup")
-async def start_scheduler():
-    logger.info("Starting APScheduler…")
-    scheduler.start()
 
 @app.on_event("shutdown")
 async def stop_scheduler():
@@ -171,9 +167,11 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     users_db = get_users_db()
     user = users_db.get(form_data.username)
     if not user or not auth.verify_password(form_data.password, user["hashed_password"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Incorrect email or password",
-                            headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
     expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     token = auth.create_access_token(data={"sub": user["email"]}, expires_delta=expires)
     return {"access_token": token, "token_type": "bearer"}
