@@ -46,7 +46,7 @@ def parse_repeat_to_cron(repeat: str) -> Optional[CronTrigger]:
     Convert a human-readable repeat pattern to a CronTrigger.
     
     Args:
-        repeat: String like "Daily", "Weekdays", or "Wednesdays"
+        repeat: String like "Daily", "Weekdays", "Wednesdays", or abbreviated day names like "mon", "tue"
         
     Returns:
         CronTrigger object or None if pattern not recognized
@@ -56,10 +56,24 @@ def parse_repeat_to_cron(repeat: str) -> Optional[CronTrigger]:
         return CronTrigger()
     if repeat == "weekdays":
         return CronTrigger(day_of_week="mon-fri")
+    
+    # Handle abbreviated day names (mon, tue, wed, etc.)
+    day_abbrevs = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+    if repeat in day_abbrevs:
+        return CronTrigger(day_of_week=repeat)
+    
+    # Handle comma-separated day abbreviations (mon,tue,wed)
+    if "," in repeat:
+        days = [day.strip() for day in repeat.split(",")]
+        if all(day in day_abbrevs for day in days):
+            return CronTrigger(day_of_week=",".join(days))
+    
+    # Original pattern matching for "mondays", "tuesdays", etc.
     m = re.match(r"(\w+)days", repeat)
     if m:
         day = m.group(1)[:3]
         return CronTrigger(day_of_week=day)
+    
     return None  # fallback, run once
 
 async def send_tcp_action(device_id: str, action: str, metadata: Optional[Dict[str, Any]] = None, retry: bool = True) -> Dict[str, Any]:
