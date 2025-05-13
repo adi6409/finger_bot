@@ -118,7 +118,7 @@ def schedule_action_job(schedule_id: str, device_id: str, action: str, time_str:
     """
     hour, minute = map(int, time_str.split(":"))
     trigger = parse_repeat_to_cron(repeat)
-    
+    print(f"Scheduling job {schedule_id} for device {device_id} at {time_str} with repeat: {repeat}")
     if trigger is None:
         # Fallback: run once at the next occurrence of the time
         now = datetime.now()
@@ -532,6 +532,7 @@ async def create_schedule(
     }
     schedules_db[schedule_id] = schedule_in_db
     set_schedules_db(schedules_db)
+    print(f"Created schedule: {schedule_in_db}")
     # Schedule the job
     schedule_action_job(schedule_id, schedule.device_id, schedule.action, schedule.time, repeat_str)
     return SchedulePublic(
