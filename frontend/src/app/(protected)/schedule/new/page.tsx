@@ -93,7 +93,9 @@ const NewSchedulePage: React.FC = () => {
           setError(err instanceof Error ? err.message : 'Unknown error fetching server time');
         }
       };
-      fetchServerTime();
+      if (serverTime === null) {
+        fetchServerTime();
+      }
     });
   
   
