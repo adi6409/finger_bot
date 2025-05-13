@@ -120,43 +120,37 @@ async def send_tcp_action(device_id: str, action: str, metadata: Optional[Dict[s
         return {"status": "error", "message": str(e)}
 
 def schedule_action_job(schedule_id: str, device_id: str, action: str, time_str: str, repeat: str) -> None:
-    """
-    Schedule a job to send an action to a device at a specific time.
-    
-    Args:
-        schedule_id: Unique ID for the schedule
-        device_id: The ID of the device to send the action to
-        action: The action to perform (e.g., "press")
-        time_str: Time in "HH:MM" format
-        repeat: Repeat pattern (e.g., "Daily", "Weekdays")
-    """
     hour, minute = map(int, time_str.split(":"))
     trigger = parse_repeat_to_cron(repeat)
+
     print(f"Scheduling job {schedule_id} for device {device_id} at {time_str} with repeat: {repeat}")
+    
     if trigger is None:
-        # Fallback: run once at the next occurrence of the time
         now = datetime.now()
         run_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if run_time < now:
             run_time += timedelta(days=1)
         scheduler.add_job(
-            send_tcp_action, 
-            "date", 
-            run_date=run_time, 
-            args=[device_id, action, {"scheduled": True}, False], 
-            id=schedule_id, 
+            send_tcp_action,
+            "date",
+            run_date=run_time,
+            args=[device_id, action, {"scheduled": True}, False],
+            id=schedule_id,
             replace_existing=True
         )
     else:
+        # FIX: set hour/minute directly in the CronTrigger
+        trigger = CronTrigger(day_of_week=trigger.fields[4].expressions[0], hour=hour, minute=minute)
         scheduler.add_job(
-            send_tcp_action, 
-            trigger, 
-            args=[device_id, action, {"scheduled": True}, False], 
-            id=schedule_id, 
-            replace_existing=True, 
-            hour=hour, 
-            minute=minute
+            send_tcp_action,
+            trigger=trigger,
+            args=[device_id, action, {"scheduled": True}, False],
+            id=schedule_id,
+            replace_existing=True
         )
+    
+    print(f"Jobs: {scheduler.get_jobs()}")
+
 
 # Configure CORS
 origins = [
