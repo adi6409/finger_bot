@@ -51,6 +51,7 @@ const NewSchedulePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [serverTime, setServerTime] = useState<string | null>(null);
 
   const [form, setForm] = useState<FormState>({
     device_id: '',
@@ -79,6 +80,23 @@ const NewSchedulePage: React.FC = () => {
     };
     fetchDevices();
   }, []);
+
+
+    // Fetch server time on mount
+    useEffect(() => {
+      const fetchServerTime = async () => {
+        try {
+          const response = await apiFetch('/time');
+          const data = await response.json();
+          setServerTime(data.time);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Unknown error fetching server time');
+        }
+      };
+      fetchServerTime();
+    });
+  
+  
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent) => {
     const { name, value } = e.target;
@@ -142,6 +160,11 @@ const NewSchedulePage: React.FC = () => {
         flexDirection: 'column',
         gap: 3,
       }}>
+
+        <Typography variant="h5" color="primary" align="center" gutterBottom>
+          Server Time: {serverTime}
+        </Typography>
+
         <Typography variant="h4" color="primary" align="center" gutterBottom>
           New Scheduled Action
         </Typography>
