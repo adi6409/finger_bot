@@ -3,7 +3,7 @@ Pydantic models for the Finger Bot backend.
 """
 
 from pydantic import BaseModel, EmailStr
-from typing import Optional, Literal
+from typing import Optional, Literal, List, Union
 
 # --- User Models ---
 
@@ -53,7 +53,7 @@ class ScheduleCreate(BaseModel):
     device_id: str
     action: Literal["press"]
     time: str  # "HH:MM" format
-    repeat: str  # e.g., "Wednesdays", "Daily", "Weekdays"
+    repeat: Union[str, List[str]]  # e.g., ["mon", "wed"], "Daily", "Weekdays"
 
 class ScheduleInDB(BaseModel):
     """Model for schedule data stored in the database."""

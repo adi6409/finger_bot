@@ -49,6 +49,7 @@ const SchedulePage: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [serverTime, setServerTime] = useState<string | null>(null);
 
   // Form state for new schedule
   const [newSchedule, setNewSchedule] = useState<Omit<Schedule, 'id'>>({
@@ -58,6 +59,21 @@ const SchedulePage: React.FC = () => {
     repeat: '',
   });
   const [creating, setCreating] = useState(false);
+
+  // Fetch server time on mount
+  useEffect(() => {
+    const fetchServerTime = async () => {
+      try {
+        const response = await apiFetch('/time');
+        const data = await response.json();
+        setServerTime(data.time);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unknown error fetching server time');
+      }
+    };
+    fetchServerTime();
+  });
+
 
   // Fetch schedules and devices on mount
   useEffect(() => {
@@ -175,53 +191,26 @@ const SchedulePage: React.FC = () => {
         Manage Schedules
       </Typography>
 
-      {/* Add New Schedule Form */}
-      <Box component="form" onSubmit={handleCreateSchedule} sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-        <FormControl sx={{ minWidth: 150 }} size="small">
-          <InputLabel id="new-device-select-label">Device</InputLabel>
-          <Select
-            labelId="new-device-select-label"
-            id="new-device-select"
-            name="device_id"
-            value={newSchedule.device_id}
-            label="Device"
-            onChange={handleNewScheduleChange}
-            required
-          >
-            {devices.map((d) => (
-              <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <TextField
-          label="Time"
-          type="time"
-          name="time"
-          value={newSchedule.time}
-          onChange={handleNewScheduleChange}
-          InputLabelProps={{ shrink: true }}
-          size="small"
-          required
-          sx={{ width: 130 }}
-        />
-        <TextField
-          label="Repeat"
-          type="text"
-          name="repeat"
-          value={newSchedule.repeat}
-          onChange={handleNewScheduleChange}
-          placeholder="e.g. Daily, Mon, Wed"
-          size="small"
-          required
-          sx={{ flexGrow: 1, minWidth: 150 }}
-        />
+      {/* Add New Schedule Button */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
         <Button
-          type="submit"
           variant="contained"
-          disabled={creating}
-          startIcon={creating ? <CircularProgress size={20} color="inherit" /> : <AddCircleOutlineIcon />}
+          color="primary"
+          size="large"
+          startIcon={<AddCircleOutlineIcon />}
+          sx={{
+            fontSize: 22,
+            px: 5,
+            py: 2,
+            borderRadius: 3,
+            boxShadow: 3,
+            minWidth: 280,
+            minHeight: 64,
+            letterSpacing: 1,
+          }}
+          onClick={() => window.location.assign('/schedule/new')}
         >
-          {creating ? 'Adding...' : 'Add Schedule'}
+          Add New Schedule
         </Button>
       </Box>
 

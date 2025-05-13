@@ -82,6 +82,7 @@ async def send_tcp_action(device_id: str, action: str, metadata: Optional[Dict[s
         "params": {...}  # Optional parameters
     }
     """
+    print(f"Sending action to device {device_id}: {action} with metadata: {metadata}")
     try:
         # Get the device's WebSocket connection if available
         ws = device_ws_connections.get(device_id)
@@ -476,6 +477,17 @@ async def delete_device(
     set_devices_db(devices_db)
     return
 
+
+@app.get("/time")
+async def get_time():
+    """
+    Get the current server time.
+    
+    Returns:
+        The current server time in ISO format
+    """
+    return {"time": datetime.now().isoformat()}
+
 # --- Schedule Management Endpoints ---
 
 @app.post("/schedules", response_model=SchedulePublic)
@@ -502,24 +514,32 @@ async def create_schedule(
     if not device or device["owner"] != current_user["email"]:
         raise HTTPException(status_code=404, detail="Device not found")
     schedule_id = str(uuid4())
+    # Normalize repeat to string
+    if isinstance(schedule.repeat, list):
+        if len(schedule.repeat) == 0:
+            repeat_str = "Once"
+        else:
+            repeat_str = ",".join(schedule.repeat)
+    else:
+        repeat_str = schedule.repeat
     schedule_in_db = {
         "id": schedule_id,
         "device_id": schedule.device_id,
         "owner": current_user["email"],
         "action": schedule.action,
         "time": schedule.time,
-        "repeat": schedule.repeat,
+        "repeat": repeat_str,
     }
     schedules_db[schedule_id] = schedule_in_db
     set_schedules_db(schedules_db)
     # Schedule the job
-    schedule_action_job(schedule_id, schedule.device_id, schedule.action, schedule.time, schedule.repeat)
+    schedule_action_job(schedule_id, schedule.device_id, schedule.action, schedule.time, repeat_str)
     return SchedulePublic(
         id=schedule_id,
         device_id=schedule.device_id,
         action=schedule.action,
         time=schedule.time,
-        repeat=schedule.repeat,
+        repeat=repeat_str,
     )
 
 @app.get("/schedules", response_model=list[SchedulePublic])
@@ -609,11 +629,19 @@ async def update_schedule(
     schedule["device_id"] = schedule_update.device_id
     schedule["action"] = schedule_update.action
     schedule["time"] = schedule_update.time
-    schedule["repeat"] = schedule_update.repeat
+    # Normalize repeat to string
+    if isinstance(schedule_update.repeat, list):
+        if len(schedule_update.repeat) == 0:
+            repeat_str = "Once"
+        else:
+            repeat_str = ",".join(schedule_update.repeat)
+    else:
+        repeat_str = schedule_update.repeat
+    schedule["repeat"] = repeat_str
     schedules_db[schedule_id] = schedule
     set_schedules_db(schedules_db)
     # Reschedule the job
-    schedule_action_job(schedule_id, schedule_update.device_id, schedule_update.action, schedule_update.time, schedule_update.repeat)
+    schedule_action_job(schedule_id, schedule_update.device_id, schedule_update.action, schedule_update.time, repeat_str)
     return SchedulePublic(
         id=schedule["id"],
         device_id=schedule["device_id"],
