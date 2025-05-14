@@ -232,6 +232,21 @@ async def delete_device(device_id: str, current_user: dict = Depends(auth.get_cu
     del devices[device_id]
     set_devices_db(devices)
 
+
+# ——————————————————————————————
+# Server Info Endpoint
+# ——————————————————————————————
+@app.get("/server-info")
+async def get_server_info(request: Request, current_user: dict = Depends(auth.get_current_active_user)):
+    if hasattr(app.state, 'server_host'):
+        host = app.state.server_host
+        port = getattr(app.state, 'server_port', 12345)
+        return {"host": host, "port": port}
+    base_url = str(request.base_url).rstrip("/")
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    return {"host": parsed.hostname, "port": parsed.port or 12345}
+
 # ——————————————————————————————
 # Schedule endpoints
 # ——————————————————————————————
