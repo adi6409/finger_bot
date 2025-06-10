@@ -118,22 +118,23 @@ const DevicesPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
 
-  const handlePress = async (id: string) => {
+  const handlePress = async (id: string, on: boolean | null) => {
     setError(null);
     setPressLoading(id); // Set loading state for this specific button
     try {
       const response = await apiFetch(`/devices/${id}/send-action`, {
         method: "POST",
-        body: JSON.stringify({ action: "press" }),
+        body: JSON.stringify({ action: on ? "on" : on === false ? "off" : "neutral" }),
       });
-      const pressResult: { status: string; result: string } = await response.json();
+      const pressResult: { status: string; message: string } = await response.json();
       console.log("Press Result:", pressResult);
-      if (pressResult.status === 'done' && pressResult.result === 'True') {
+      if (pressResult.status === 'sent') {
         setSnackbarMessage('Action successful!');
         setSnackbarSeverity('success');
       } else {
+        
         // Handle cases where status is not 'done' or result is not 'True' as failure
-        setSnackbarMessage(`Action failed: ${pressResult.result || 'Unknown reason'}`);
+        setSnackbarMessage(`Action failed: ${pressResult.message || 'Unknown reason'}`);
         setSnackbarSeverity('error');
       }
       setSnackbarOpen(true);
@@ -266,11 +267,32 @@ const DevicesPage: React.FC = () => {
                         color="success"
                         size="small"
                         startIcon={pressLoading === device.id ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
-                        onClick={() => handlePress(device.id)}
+                        onClick={() => handlePress(device.id, true)}
                         disabled={pressLoading === device.id}
                       >
-                        Press
+                        On
                       </Button>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        size="small"
+                        startIcon={<PlayArrowIcon />}
+                        onClick={() => handlePress(device.id, null)}
+                        disabled={pressLoading === device.id}
+                      >
+                        Neutral
+                      </Button>
+                      <Button
+                        variant="contained"
+                        color="error"
+                        size="small"
+                        startIcon={<PlayArrowIcon />}
+                        onClick={() => handlePress(device.id, false)}
+                        disabled={pressLoading === device.id}
+                      >
+                        Off
+                      </Button>
+
                       <Button
                         variant="outlined"
                         color="error"

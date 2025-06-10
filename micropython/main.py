@@ -24,7 +24,7 @@ import wifi_config
 import ble_setup
 
 # --- Constants ---
-SETUP_BUTTON_PIN = 6      # GPIO0 is often the BOOT button on ESP32 boards
+SETUP_BUTTON_PIN = 16      # GPIO0 is often the BOOT button on ESP32 boards
 SERVO_PIN = 2             # GPIO2 for servo control
 SETUP_MODE_TIMEOUT = 300  # 5 minutes timeout for setup mode
 WIFI_CONNECT_TIMEOUT = 20 # 20 seconds timeout for WiFi connection
@@ -38,6 +38,11 @@ LED_BLUE = (0, 0, 255)      # Setup mode / WiFi connected
 LED_GREEN = (0, 255, 0)     # Action in progress
 LED_CYAN = (0, 255, 255)    # WiFi connected, waiting for registration
 LED_RED = (255, 0, 0)       # Error state
+
+# --- Servo Positions ---
+SERVO_NEUTRAL = 90
+SERVO_ON = 135
+SERVO_OFF = 45
 
 # --- Hardware Setup ---
 setup_button = Pin(SETUP_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
@@ -89,6 +94,41 @@ def press():
         time.sleep(1)
         set_rgb(*LED_OFF)
         return False
+        
+# Woohoo! The device now has a 3d-printed arm that can go both directions: right for on, left for off.
+# When idle, the arm is in the middle position.
+# When receiving a "on" action, the arm moves to the right (180 degrees) for 0.5 seconds.
+# When receiving a "off" action, the arm moves to the left (0 degrees) for 0.5 seconds.
+
+def turn_on():
+    """
+    Turn on the device
+    """
+    set_rgb(*LED_GREEN)  # Green for pressed
+    set_servo_angle(servo, SERVO_ON)  # Rotate to 180 degrees
+    # time.sleep(0.5)
+    # set_servo_angle(servo, 90)  # Return to 0 degrees
+    set_rgb(*LED_OFF)  # Off after pressing
+
+def neutral():
+    """
+    Set the servo to the neutral position
+    """
+    print("Setting servo to neutral position")
+    set_rgb(*LED_GREEN)  # Off after pressing
+    set_servo_angle(servo, SERVO_NEUTRAL)
+    set_rgb(*LED_OFF)  # Off after pressing
+
+def turn_off():
+    """
+    Turn off the device
+    """
+    set_rgb(*LED_RED)  # Red for pressed
+    set_servo_angle(servo, SERVO_OFF)  # Rotate to 0 degrees
+    # time.sleep(0.5)
+    # set_servo_angle(servo, 90)  # Return to 0 degrees
+    set_rgb(*LED_OFF)  # Off after pressing
+
 
 def connect_wifi():
     """
@@ -183,7 +223,7 @@ def enter_setup_mode():
                 blink_rgb_led(*LED_CYAN, 0.5)
             else:
                 # Blink blue if in initial setup mode
-                blink_rgb_led(*LED_BLUE, 0.5)
+                blink_rgb_led(*LED_BLUE, 0.2)
                 
             time.sleep(0.5)
     except Exception as e:
@@ -253,6 +293,15 @@ def handle_websocket_message(ws, msg):
                 "params": {"result": result, "timestamp": time.time()}
             }
             ws.send(json.dumps(response))
+        elif action == "on":
+            print("Executing on action")
+            turn_on()
+        elif action == "neutral":
+            print("Executing neutral action")
+            neutral()
+        elif action == "off":
+            print("Executing off action")
+            turn_off()
         elif action == "ping":
             # Respond to ping with pong
             ws.send(json.dumps({"action": "pong", "params": {"timestamp": time.time()}}))
@@ -349,9 +398,12 @@ def main():
     """
     global device_mac
     
+    
     try:
         # Initialize device
         print("\n--- ESP32 Finger Bot Starting ---\n")
+        # Set the servo to the middle position
+        set_servo_angle(servo, 90)
         
         # Load or generate device ID
         device_mac = device_id.load_device_id()

@@ -1,1 +1,7 @@
-{}
+{
+  "F0:F5:BD:2D:38:64": {
+    "id": "F0:F5:BD:2D:38:64",
+    "name": "fin",
+    "owner": "test@test.com"
+  }
+}

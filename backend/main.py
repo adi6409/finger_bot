@@ -43,7 +43,9 @@ app = FastAPI(
 @app.on_event("startup")
 async def start_scheduler():
     logger.info("Starting APScheduler…")
-    scheduler.start()
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("APScheduler started successfully")
 
 @app.on_event("shutdown")
 async def stop_scheduler():
