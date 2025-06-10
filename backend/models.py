@@ -51,7 +51,7 @@ class DeviceSetupInfo(BaseModel):
 class ScheduleCreate(BaseModel):
     """Model for schedule creation data."""
     device_id: str
-    action: Literal["press"]
+    action: str
     time: str  # "HH:MM" format
     repeat: Union[str, List[str]]  # e.g., ["mon", "wed"], "Daily", "Weekdays"
 

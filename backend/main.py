@@ -40,12 +40,34 @@ app = FastAPI(
     version="1.0.0",
 )
 
+def load_existing_schedules():
+    """Load all existing schedules from database and schedule them"""
+    schedules = get_schedules_db()
+    logger.info(f"Loading {len(schedules)} existing schedules from database...")
+    
+    for schedule_id, schedule_data in schedules.items():
+        try:
+            schedule_action_job(
+                schedule_id,
+                schedule_data["device_id"],
+                schedule_data["action"],
+                schedule_data["time"],
+                schedule_data["repeat"]
+            )
+            logger.info(f"Loaded schedule {schedule_id}: {schedule_data['action']} at {schedule_data['time']} ({schedule_data['repeat']})")
+        except Exception as e:
+            logger.error(f"Failed to load schedule {schedule_id}: {e}")
+    
+    logger.info(f"Total active jobs after loading: {len(scheduler.get_jobs())}")
+
 @app.on_event("startup")
 async def start_scheduler():
     logger.info("Starting APScheduler…")
     if not scheduler.running:
         scheduler.start()
         logger.info("APScheduler started successfully")
+        # Load existing schedules from database
+        load_existing_schedules()
 
 @app.on_event("shutdown")
 async def stop_scheduler():

@@ -25,6 +25,9 @@ type Device = {
 const actions = [
   { value: 'press', label: 'Press' },
   { value: 'release', label: 'Release' },
+  { value: 'on', label: 'On' },
+  { value: 'off', label: 'Off' },
+  { value: 'neutral', label: 'Neutral' },
   // Add more actions as needed
 ];
 

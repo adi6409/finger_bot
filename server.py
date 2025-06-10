@@ -72,13 +72,15 @@ app.mount("/api", backend_app)
 # Ensure backend app startup events are triggered
 @app.on_event("startup")
 async def startup_event():
-    # Trigger backend app startup events
-    await backend_app.router.startup()
+    # Manually trigger backend app startup events
+    for handler in backend_app.router.on_startup:
+        await handler()
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    # Trigger backend app shutdown events
-    await backend_app.router.shutdown()
+    # Manually trigger backend app shutdown events  
+    for handler in backend_app.router.on_shutdown:
+        await handler()
 
 # Helper function to proxy requests to the Next.js dev server
 async def proxy_to_nextjs(request: Request, path: str = ""):
